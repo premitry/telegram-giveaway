@@ -1,0 +1,41 @@
+name: Deploy to Cloudflare Workers
+
+# Auto-deploy on every push to main.
+# One-time setup (GitHub → repo Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — a token with "Edit Cloudflare Workers" permission
+#   CLOUDFLARE_ACCOUNT_ID  — your Cloudflare account id
+#
+# Notes:
+# - Runtime secrets (BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET) are NOT set here; set them
+#   once with `wrangler secret put ...`. They persist across deploys.
+# - This workflow deploys code only. It does not run D1 migrations.
+# - If you instead connect the repo via Cloudflare's "Workers Builds" (dashboard),
+#   delete this file to avoid deploying twice.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.toml
