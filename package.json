@@ -1,0 +1,22 @@
+{
+  "name": "telegram-giveaway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram Giveaway Bot running 100% on Cloudflare Workers (D1 + Queues + Cron).",
+  "scripts": {
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "dev": "wrangler dev --config wrangler.toml",
+    "typecheck": "tsc --noEmit",
+    "migrate:local": "wrangler d1 migrations apply telegram-giveaway --local --config wrangler.toml",
+    "migrate:remote": "wrangler d1 migrations apply telegram-giveaway --remote --config wrangler.toml",
+    "set-webhook": "tsx scripts/set-webhook.ts",
+    "delete-webhook": "tsx scripts/set-webhook.ts --delete"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260811.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.4.0"
+  }
+}

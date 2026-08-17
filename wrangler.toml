@@ -1,0 +1,48 @@
+name = "telegram-giveaway-bot"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# ---------------------------------------------------------------------------
+# Public (non-secret) variables. Secrets (BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET)
+# are set via `wrangler secret put ...` — never commit them here.
+# ---------------------------------------------------------------------------
+[vars]
+# Comma-separated Telegram numeric user IDs allowed to use admin commands.
+ADMIN_IDS = "123456789,987654321"
+# Optional: bot username used to build referral links. If empty the bot
+# resolves it automatically via getMe and caches it.
+BOT_USERNAME = ""
+
+# ---------------------------------------------------------------------------
+# D1 database binding. Replace database_id after `wrangler d1 create ...`.
+# ---------------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "telegram-giveaway"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ---------------------------------------------------------------------------
+# Cloudflare Queues (requires a paid Workers plan).
+# Producer + consumer both bound to this Worker.
+# ---------------------------------------------------------------------------
+[[queues.producers]]
+binding = "BROADCAST_QUEUE"
+queue = "giveaway-broadcast"
+
+[[queues.consumers]]
+queue = "giveaway-broadcast"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "giveaway-broadcast-dlq"
+
+# ---------------------------------------------------------------------------
+# Cron Trigger: every 5 minutes flips expired active giveaways to awaiting_draw
+# (and auto-draws when auto_draw = 1).
+# ---------------------------------------------------------------------------
+[triggers]
+crons = ["*/5 * * * *"]
+
+[observability]
+enabled = true
