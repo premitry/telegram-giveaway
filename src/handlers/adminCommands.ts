@@ -80,6 +80,14 @@ export async function cmdEnd(env: Env, message: TelegramMessage, args: string[])
 /** /broadcast [id] <text> — queue a message to all participants. */
 export async function cmdBroadcast(env: Env, message: TelegramMessage, args: string[]): Promise<void> {
   const chatId = message.chat.id;
+  if (!env.BROADCAST_QUEUE) {
+    await sendMessage(
+      env,
+      chatId,
+      '⚠️ Fitur <b>/broadcast</b> butuh Cloudflare Queues (Workers <b>Paid</b> plan). Aktifkan plan berbayar lalu un-comment blok <code>[[queues.*]]</code> di wrangler.toml.',
+    );
+    return;
+  }
   let target = args;
   let text: string;
   if (args[0] && /^\d+$/.test(args[0]) && args.length > 1) {

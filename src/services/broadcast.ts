@@ -21,6 +21,12 @@ export async function enqueueBroadcast(
   giveawayId: number,
   text: string,
 ): Promise<number> {
+  const queue = env.BROADCAST_QUEUE;
+  if (!queue) {
+    // Free plan: Queues binding not available. Signal caller to explain.
+    throw new Error('QUEUE_UNAVAILABLE');
+  }
+
   const res = await env.DB.prepare(
     `SELECT u.telegram_id AS telegram_id
        FROM participants p
@@ -36,7 +42,7 @@ export async function enqueueBroadcast(
   const chunkSize = 100;
   for (let i = 0; i < recipients.length; i += chunkSize) {
     const chunk = recipients.slice(i, i + chunkSize);
-    await env.BROADCAST_QUEUE.sendBatch(
+    await queue.sendBatch(
       chunk.map((r) => ({ body: { chatId: r.telegram_id, text } satisfies BroadcastMessage })),
     );
   }

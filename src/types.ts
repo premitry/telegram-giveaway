@@ -3,7 +3,9 @@ import type { BroadcastMessage } from './services/broadcast';
 /** Worker bindings (wrangler.toml [vars]/[[d1_databases]]/[[queues.*]] + secrets). */
 export interface Env {
   DB: D1Database;
-  BROADCAST_QUEUE: Queue<BroadcastMessage>;
+  // Optional: only bound on paid plans (Cloudflare Queues). Broadcast degrades
+  // gracefully when this is absent.
+  BROADCAST_QUEUE?: Queue<BroadcastMessage>;
   // secrets
   BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET: string;
