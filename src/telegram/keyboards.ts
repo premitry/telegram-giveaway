@@ -1,4 +1,22 @@
-import type { InlineKeyboardMarkup } from './types';
+import type { InlineKeyboardButton, InlineKeyboardMarkup } from './types';
+
+/** Main menu shown on /start (buttons vary for admins). */
+export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = [
+    [{ text: '🎉 Giveaway Aktif', callback_data: 'menu:active' }],
+    [
+      { text: '🎟 Entry Saya', callback_data: 'menu:entries' },
+      { text: '❓ Cara Ikut', callback_data: 'menu:howto' },
+    ],
+  ];
+  if (admin) {
+    rows.push([
+      { text: '➕ Buat Giveaway', callback_data: 'menu:new' },
+      { text: '📊 Statistik', callback_data: 'menu:stats' },
+    ]);
+  }
+  return { inline_keyboard: rows };
+}
 
 /** JOIN button shown on the published giveaway post. */
 export function joinKeyboard(giveawayId: number): InlineKeyboardMarkup {

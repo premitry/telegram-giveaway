@@ -54,7 +54,7 @@ export async function handleCommand(env: Env, message: TelegramMessage): Promise
       await sendMessage(env, chatId, HELP_USER + (admin ? '\n' + HELP_ADMIN : ''));
       return;
     case '/newgiveaway':
-      await needAdmin(() => startWizard(env, message));
+      await needAdmin(() => startWizard(env, chatId, String(message.from!.id)));
       return;
     case '/stats':
       await needAdmin(() => cmdStats(env, message, args));

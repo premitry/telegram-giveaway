@@ -1,14 +1,14 @@
 import type { Env, GiveawayRow, ParticipantRow } from '../types';
 import type { CallbackQuery } from '../telegram/types';
 import { answerCallback, sendMessage, getBotUsername } from '../telegram/api';
-import { getGiveaway } from '../db/giveaways';
+import { getGiveaway, getLatestGiveaway } from '../db/giveaways';
 import { getUserByTelegramId } from '../db/users';
-import { getParticipant, countParticipants } from '../db/participants';
+import { getParticipant, countParticipants, totalEntries } from '../db/participants';
 import {
   joinGiveaway,
   entriesSummary,
 } from '../services/participant';
-import { updatePublishedCard } from '../services/giveaway';
+import { updatePublishedCard, sendGiveawayCard } from '../services/giveaway';
 import { channelUrl } from '../services/membership';
 import { buildReferralLink } from '../services/referral';
 import {
@@ -16,7 +16,18 @@ import {
   participatingKeyboard,
   inviteKeyboard,
 } from '../telegram/keyboards';
-import { handleWizardCallback } from './admin';
+import { handleWizardCallback, startWizard } from './admin';
+import { isAdmin } from './auth';
+
+const HOWTO = [
+  '❓ <b>Cara Ikut Giveaway</b>',
+  '',
+  '1️⃣ Tekan <b>🎉 Giveaway Aktif</b> lalu <b>JOIN GIVEAWAY</b>.',
+  '2️⃣ Kalau diminta, <b>join channel</b> dulu lalu tekan <b>CHECK AGAIN</b>.',
+  '3️⃣ Setelah masuk, tekan <b>👥 INVITE FRIENDS</b> untuk dapat link referral.',
+  '',
+  '🎟 Tiap teman valid = <b>+1 entry</b> (menambah peluang menang).',
+].join('\n');
 
 function participatingText(entries: number, validReferrals: number): string {
   return [
@@ -115,12 +126,86 @@ async function handleEntries(env: Env, cq: CallbackQuery, giveawayId: number): P
   });
 }
 
+/** Handle the /start main-menu buttons (menu:active / entries / howto / new / stats). */
+async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<void> {
+  const chatId = cq.from.id;
+
+  switch (action) {
+    case 'active': {
+      const g = await getLatestGiveaway(env.DB);
+      if (!g || g.status !== 'active') {
+        await answerCallback(env, cq.id, 'Belum ada giveaway aktif saat ini.', true);
+        return;
+      }
+      await answerCallback(env, cq.id);
+      const count = await countParticipants(env.DB, g.id);
+      await sendGiveawayCard(env, chatId, g, count);
+      return;
+    }
+    case 'entries': {
+      const g = await getLatestGiveaway(env.DB);
+      if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
+      const user = await getUserByTelegramId(env.DB, String(cq.from.id));
+      const participant = user ? await getParticipant(env.DB, g.id, user.id) : null;
+      if (!participant) {
+        await answerCallback(env, cq.id, 'Kamu belum ikut giveaway. Tekan JOIN dulu.', true);
+        return;
+      }
+      await answerCallback(env, cq.id);
+      const summary = await entriesSummary(env.DB, g.id, participant);
+      await sendMessage(env, chatId, participatingText(summary.totalEntries, summary.validReferrals), {
+        reply_markup: participatingKeyboard(g.id),
+      });
+      return;
+    }
+    case 'howto':
+      await answerCallback(env, cq.id);
+      await sendMessage(env, chatId, HOWTO);
+      return;
+    case 'new':
+      if (!isAdmin(env, cq.from.id)) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      await answerCallback(env, cq.id);
+      await startWizard(env, chatId, String(cq.from.id));
+      return;
+    case 'stats': {
+      if (!isAdmin(env, cq.from.id)) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      const g = await getLatestGiveaway(env.DB);
+      if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
+      await answerCallback(env, cq.id);
+      const [participants, entries] = await Promise.all([
+        countParticipants(env.DB, g.id),
+        totalEntries(env.DB, g.id),
+      ]);
+      await sendMessage(
+        env,
+        chatId,
+        [
+          `📊 <b>Statistik</b> — #${g.id}`,
+          `<i>${g.title}</i>`,
+          '',
+          `👥 Participants: <b>${participants}</b>`,
+          `🎟 Total Entries: <b>${entries}</b>`,
+          `⏳ Status: <b>${g.status}</b>`,
+        ].join('\n'),
+      );
+      return;
+    }
+    default:
+      await answerCallback(env, cq.id);
+  }
+}
+
 /** Entry point for all callback_query updates. */
 export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void> {
   const data = cq.data ?? '';
 
   if (data.startsWith('wiz:')) {
     await handleWizardCallback(env, cq);
+    return;
+  }
+
+  if (data.startsWith('menu:')) {
+    await handleMenu(env, cq, data.slice('menu:'.length));
     return;
   }
 

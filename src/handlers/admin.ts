@@ -23,10 +23,9 @@ const PROMPTS: Record<WizardStep, string> = {
   preview: '',
 };
 
-export async function startWizard(env: Env, message: TelegramMessage): Promise<void> {
-  const tgId = String(message.from!.id);
+export async function startWizard(env: Env, chatId: number, tgId: string): Promise<void> {
   await setSession(env.DB, tgId, 'title', {});
-  await sendMessage(env, message.chat.id, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title);
+  await sendMessage(env, chatId, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title);
 }
 
 async function showPreview(env: Env, chatId: number, data: WizardData): Promise<void> {

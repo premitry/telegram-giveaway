@@ -6,13 +6,17 @@ import { getGiveaway, getLatestGiveaway } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { parseStartPayload, recordPendingReferral } from '../services/referral';
 import { sendGiveawayCard } from '../services/giveaway';
+import { startMenuKeyboard } from '../telegram/keyboards';
+import { isAdmin } from './auth';
 
 const WELCOME = [
   '👋 <b>Selamat datang di Giveaway Bot!</b>',
   '',
-  'Bot ini menjalankan giveaway Telegram. Kalau ada giveaway aktif, kartunya akan muncul di bawah.',
+  'Pilih menu di bawah 👇',
   '',
-  'Tekan tombol <b>🎉 JOIN GIVEAWAY</b> untuk ikut.',
+  '• <b>🎉 Giveaway Aktif</b> — lihat giveaway yang sedang berjalan',
+  '• <b>🎟 Entry Saya</b> — cek jumlah entry kamu',
+  '• <b>❓ Cara Ikut</b> — panduan singkat',
 ].join('\n');
 
 /** Handle /start, including referral deep links (?start=g_<id>_r_<uid>). */
@@ -41,8 +45,9 @@ export async function handleStart(env: Env, message: TelegramMessage): Promise<v
     return;
   }
 
-  // Plain /start — show welcome and the latest active giveaway if any.
-  await sendMessage(env, chatId, WELCOME);
+  // Plain /start — show welcome menu + the latest active giveaway if any.
+  const admin = isAdmin(env, message.from.id);
+  await sendMessage(env, chatId, WELCOME, { reply_markup: startMenuKeyboard(admin) });
   const latest = await getLatestGiveaway(env.DB);
   if (latest && latest.status === 'active') {
     const count = await countParticipants(env.DB, latest.id);
