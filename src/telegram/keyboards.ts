@@ -18,6 +18,31 @@ export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
   return { inline_keyboard: rows };
 }
 
+/** Single "back to main menu" button. */
+export function backKeyboard(): InlineKeyboardMarkup {
+  return { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu:home' }]] };
+}
+
+/** In-menu giveaway view: JOIN + back. */
+export function activeMenuKeyboard(giveawayId: number): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }],
+      [{ text: '⬅️ Kembali', callback_data: 'menu:home' }],
+    ],
+  };
+}
+
+/** In-menu entries view: invite friends + back. */
+export function entriesMenuKeyboard(giveawayId: number): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '👥 INVITE FRIENDS', callback_data: `invite:${giveawayId}` }],
+      [{ text: '⬅️ Kembali', callback_data: 'menu:home' }],
+    ],
+  };
+}
+
 /** JOIN button shown on the published giveaway post. */
 export function joinKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return { inline_keyboard: [[{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }]] };

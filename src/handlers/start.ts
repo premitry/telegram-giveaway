@@ -9,7 +9,7 @@ import { sendGiveawayCard } from '../services/giveaway';
 import { startMenuKeyboard } from '../telegram/keyboards';
 import { isAdmin } from './auth';
 
-const WELCOME = [
+export const WELCOME = [
   '👋 <b>Selamat datang di Giveaway Bot!</b>',
   '',
   'Pilih menu di bawah 👇',

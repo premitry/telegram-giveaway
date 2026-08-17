@@ -1,6 +1,6 @@
 import type { Env, GiveawayRow, ParticipantRow } from '../types';
-import type { CallbackQuery } from '../telegram/types';
-import { answerCallback, sendMessage, getBotUsername } from '../telegram/api';
+import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
+import { answerCallback, sendMessage, editMessageText, getBotUsername } from '../telegram/api';
 import { getGiveaway, getLatestGiveaway } from '../db/giveaways';
 import { getUserByTelegramId } from '../db/users';
 import { getParticipant, countParticipants, totalEntries } from '../db/participants';
@@ -8,16 +8,21 @@ import {
   joinGiveaway,
   entriesSummary,
 } from '../services/participant';
-import { updatePublishedCard, sendGiveawayCard } from '../services/giveaway';
+import { updatePublishedCard, renderCaption } from '../services/giveaway';
 import { channelUrl } from '../services/membership';
 import { buildReferralLink } from '../services/referral';
 import {
   notEligibleKeyboard,
   participatingKeyboard,
   inviteKeyboard,
+  startMenuKeyboard,
+  backKeyboard,
+  activeMenuKeyboard,
+  entriesMenuKeyboard,
 } from '../telegram/keyboards';
 import { handleWizardCallback, startWizard } from './admin';
 import { isAdmin } from './auth';
+import { WELCOME } from './start';
 
 const HOWTO = [
   '❓ <b>Cara Ikut Giveaway</b>',
@@ -38,16 +43,27 @@ function participatingText(entries: number, validReferrals: number): string {
   ].join('\n');
 }
 
-async function sendParticipatingCard(
+/**
+ * Show the "you're participating" view. When the button was pressed inside a
+ * private chat menu, edit that message in place (clean navigation, with back);
+ * otherwise (e.g. from the public channel post) send a fresh DM.
+ */
+async function showParticipating(
   env: Env,
-  chatId: number,
+  cq: CallbackQuery,
   giveaway: GiveawayRow,
   participant: ParticipantRow,
 ): Promise<void> {
   const summary = await entriesSummary(env.DB, giveaway.id, participant);
-  await sendMessage(env, chatId, participatingText(summary.totalEntries, summary.validReferrals), {
-    reply_markup: participatingKeyboard(giveaway.id),
-  });
+  const text = participatingText(summary.totalEntries, summary.validReferrals);
+  const msg = cq.message;
+  if (msg && msg.chat.type === 'private') {
+    await editMessageText(env, msg.chat.id, msg.message_id, text, {
+      reply_markup: entriesMenuKeyboard(giveaway.id),
+    });
+  } else {
+    await sendMessage(env, cq.from.id, text, { reply_markup: participatingKeyboard(giveaway.id) });
+  }
 }
 
 async function handleJoinOrCheck(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
@@ -71,11 +87,11 @@ async function handleJoinOrCheck(env: Env, cq: CallbackQuery, giveawayId: number
       return;
     case 'already':
       await answerCallback(env, cq.id, '✅ Kamu sudah terdaftar di giveaway ini.');
-      await sendParticipatingCard(env, chatId, giveaway, result.participant);
+      await showParticipating(env, cq, giveaway, result.participant);
       return;
     case 'joined': {
       await answerCallback(env, cq.id, '🎉 Berhasil ikut giveaway!');
-      await sendParticipatingCard(env, chatId, giveaway, result.participant);
+      await showParticipating(env, cq, giveaway, result.participant);
       const count = await countParticipants(env.DB, giveaway.id);
       await updatePublishedCard(env, giveaway, count);
       return;
@@ -126,11 +142,25 @@ async function handleEntries(env: Env, cq: CallbackQuery, giveawayId: number): P
   });
 }
 
-/** Handle the /start main-menu buttons (menu:active / entries / howto / new / stats). */
+/** Handle the /start main-menu buttons — navigates in place (edits the same message). */
 async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<void> {
   const chatId = cq.from.id;
+  const msg = cq.message;
+
+  // Render a view in place: edit the menu message when possible, else send a new one.
+  const show = async (text: string, keyboard: InlineKeyboardMarkup): Promise<void> => {
+    if (msg) {
+      await editMessageText(env, chatId, msg.message_id, text, { reply_markup: keyboard });
+    } else {
+      await sendMessage(env, chatId, text, { reply_markup: keyboard });
+    }
+  };
 
   switch (action) {
+    case 'home':
+      await answerCallback(env, cq.id);
+      await show(WELCOME, startMenuKeyboard(isAdmin(env, cq.from.id)));
+      return;
     case 'active': {
       const g = await getLatestGiveaway(env.DB);
       if (!g || g.status !== 'active') {
@@ -139,7 +169,7 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       }
       await answerCallback(env, cq.id);
       const count = await countParticipants(env.DB, g.id);
-      await sendGiveawayCard(env, chatId, g, count);
+      await show(renderCaption(g, count), activeMenuKeyboard(g.id));
       return;
     }
     case 'entries': {
@@ -148,19 +178,17 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       const user = await getUserByTelegramId(env.DB, String(cq.from.id));
       const participant = user ? await getParticipant(env.DB, g.id, user.id) : null;
       if (!participant) {
-        await answerCallback(env, cq.id, 'Kamu belum ikut giveaway. Tekan JOIN dulu.', true);
+        await answerCallback(env, cq.id, 'Kamu belum ikut giveaway. Tekan Giveaway Aktif → JOIN dulu.', true);
         return;
       }
       await answerCallback(env, cq.id);
       const summary = await entriesSummary(env.DB, g.id, participant);
-      await sendMessage(env, chatId, participatingText(summary.totalEntries, summary.validReferrals), {
-        reply_markup: participatingKeyboard(g.id),
-      });
+      await show(participatingText(summary.totalEntries, summary.validReferrals), entriesMenuKeyboard(g.id));
       return;
     }
     case 'howto':
       await answerCallback(env, cq.id);
-      await sendMessage(env, chatId, HOWTO);
+      await show(HOWTO, backKeyboard());
       return;
     case 'new':
       if (!isAdmin(env, cq.from.id)) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
@@ -176,9 +204,7 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
         countParticipants(env.DB, g.id),
         totalEntries(env.DB, g.id),
       ]);
-      await sendMessage(
-        env,
-        chatId,
+      await show(
         [
           `📊 <b>Statistik</b> — #${g.id}`,
           `<i>${g.title}</i>`,
@@ -187,6 +213,7 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
           `🎟 Total Entries: <b>${entries}</b>`,
           `⏳ Status: <b>${g.status}</b>`,
         ].join('\n'),
+        backKeyboard(),
       );
       return;
     }

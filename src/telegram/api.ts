@@ -89,6 +89,21 @@ export function sendMessage(
   );
 }
 
+/** Edit an existing text message in place (used for the in-menu navigation). */
+export function editMessageText(
+  env: Env,
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  extra: Record<string, unknown> = {},
+): Promise<TelegramResponse<TelegramMessage>> {
+  return telegram<TelegramMessage>(
+    'editMessageText',
+    { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra },
+    env,
+  );
+}
+
 // Module-level cache for the bot username within an isolate.
 let cachedUsername: string | null = null;
 
