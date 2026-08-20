@@ -80,6 +80,9 @@ export interface WizardData {
   max_referral_bonus?: number;
   image_file_id?: string | null;
   publish_chat_id?: string;
+  /** Internal: set while editing a single field from the preview, so the next
+   * valid input returns to the preview instead of advancing to the next step. */
+  _edit?: boolean;
 }
 
 export type WizardStep =

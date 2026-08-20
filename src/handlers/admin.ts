@@ -5,8 +5,26 @@ import { getSession, setSession, clearSession } from '../db/sessions';
 import { createGiveaway, getGiveaway, setPublishInfo } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { renderCaption, wizardToPreviewRow, publishGiveaway } from '../services/giveaway';
-import { previewKeyboard } from '../telegram/keyboards';
+import {
+  previewKeyboard,
+  wizardFieldsKeyboard,
+  wizardStepKeyboard,
+  wizardEditFieldKeyboard,
+} from '../telegram/keyboards';
 import { parseWibToUtc, formatWib, isPast } from '../utils/datetime';
+
+/** Steps in fill order (preview excluded — it's the terminal step). */
+const ORDER: WizardStep[] = [
+  'title',
+  'description',
+  'prize',
+  'winners_count',
+  'required_channel',
+  'deadline',
+  'max_referral_bonus',
+  'image',
+  'publish_dest',
+];
 
 const PROMPTS: Record<WizardStep, string> = {
   title: '📝 <b>1/9</b> Kirim <b>JUDUL</b> giveaway:',
@@ -25,7 +43,15 @@ const PROMPTS: Record<WizardStep, string> = {
 
 export async function startWizard(env: Env, chatId: number, tgId: string): Promise<void> {
   await setSession(env.DB, tgId, 'title', {});
-  await sendMessage(env, chatId, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title);
+  await sendMessage(env, chatId, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title, {
+    reply_markup: wizardStepKeyboard(false),
+  });
+}
+
+/** Send the prompt for a step, with back/cancel controls attached. */
+async function promptStep(env: Env, chatId: number, step: WizardStep): Promise<void> {
+  const canBack = ORDER.indexOf(step) > 0;
+  await sendMessage(env, chatId, PROMPTS[step], { reply_markup: wizardStepKeyboard(canBack) });
 }
 
 async function showPreview(env: Env, chatId: number, data: WizardData): Promise<void> {
@@ -56,41 +82,54 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
   const data = session.data;
   const text = (message.text ?? '').trim();
 
-  const advance = async (step: WizardStep): Promise<void> => {
-    await setSession(env.DB, tgId, step, data);
-    await sendMessage(env, chatId, PROMPTS[step]);
+  // Store the field value, then either return to preview (single-field edit)
+  // or advance to the next step.
+  const commit = async (nextStep: WizardStep): Promise<void> => {
+    if (data._edit) {
+      delete data._edit;
+      await setSession(env.DB, tgId, 'preview', data);
+      await showPreview(env, chatId, data);
+      return;
+    }
+    if (nextStep === 'preview') {
+      await setSession(env.DB, tgId, 'preview', data);
+      await showPreview(env, chatId, data);
+      return;
+    }
+    await setSession(env.DB, tgId, nextStep, data);
+    await promptStep(env, chatId, nextStep);
   };
   const reject = (msg: string): Promise<unknown> => sendMessage(env, chatId, msg);
 
   switch (session.step) {
     case 'title':
       if (!text) { await reject('❌ Judul tidak boleh kosong. Coba lagi:'); return true; }
-      data.title = text; await advance('description'); return true;
+      data.title = text; await commit('description'); return true;
     case 'description':
-      data.description = text === '-' ? null : text; await advance('prize'); return true;
+      data.description = text === '-' ? null : text; await commit('prize'); return true;
     case 'prize':
       if (!text) { await reject('❌ Prize tidak boleh kosong. Coba lagi:'); return true; }
-      data.prize = text; await advance('winners_count'); return true;
+      data.prize = text; await commit('winners_count'); return true;
     case 'winners_count': {
       const n = Number.parseInt(text, 10);
       if (!Number.isInteger(n) || n < 1) { await reject('❌ Masukkan angka ≥ 1:'); return true; }
-      data.winners_count = n; await advance('required_channel'); return true;
+      data.winners_count = n; await commit('required_channel'); return true;
     }
     case 'required_channel': {
       let ch = text;
       if (!ch.startsWith('@') && !ch.startsWith('http') && !ch.startsWith('-100')) ch = '@' + ch;
-      data.required_channel = ch; await advance('deadline'); return true;
+      data.required_channel = ch; await commit('deadline'); return true;
     }
     case 'deadline': {
       const iso = parseWibToUtc(text);
       if (!iso) { await reject('❌ Format salah. Pakai <code>YYYY-MM-DD HH:MM</code>:'); return true; }
       if (isPast(iso)) { await reject('❌ Deadline sudah lewat. Masukkan waktu mendatang:'); return true; }
-      data.deadline = iso; await advance('max_referral_bonus'); return true;
+      data.deadline = iso; await commit('max_referral_bonus'); return true;
     }
     case 'max_referral_bonus': {
       const n = Number.parseInt(text, 10);
       if (!Number.isInteger(n) || n < 0) { await reject('❌ Masukkan angka ≥ 0:'); return true; }
-      data.max_referral_bonus = n; await advance('image'); return true;
+      data.max_referral_bonus = n; await commit('image'); return true;
     }
     case 'image':
       if (message.photo && message.photo.length > 0) {
@@ -100,13 +139,12 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
       } else {
         await reject('❌ Kirim gambar, atau ketik <code>-</code> untuk lewati:'); return true;
       }
-      await advance('publish_dest'); return true;
+      await commit('publish_dest'); return true;
     case 'publish_dest': {
       const dest = text === 'here' ? String(chatId) : text;
       if (!dest) { await reject('❌ Tujuan tidak valid:'); return true; }
       data.publish_chat_id = dest;
-      await setSession(env.DB, tgId, 'preview', data);
-      await showPreview(env, chatId, data);
+      await commit('preview');
       return true;
     }
     case 'preview':
@@ -126,7 +164,8 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
     await answerCallback(env, cq.id, 'Sesi tidak ditemukan / sudah selesai.', true);
     return;
   }
-  const action = (cq.data ?? '').split(':')[1];
+  const parts = (cq.data ?? '').split(':');
+  const action = parts[1];
 
   if (action === 'cancel') {
     await clearSession(env.DB, tgId);
@@ -134,10 +173,49 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
     await sendMessage(env, chatId, '❌ Pembuatan giveaway dibatalkan.');
     return;
   }
+  // Go back one step during the initial fill (data preserved).
+  if (action === 'back') {
+    const idx = ORDER.indexOf(session.step);
+    if (idx <= 0) {
+      await answerCallback(env, cq.id, 'Sudah di langkah pertama.', true);
+      return;
+    }
+    const prev = ORDER[idx - 1];
+    await setSession(env.DB, tgId, prev, session.data);
+    await answerCallback(env, cq.id);
+    await promptStep(env, chatId, prev);
+    return;
+  }
+  // Preview EDIT → show the field picker.
   if (action === 'edit') {
-    await setSession(env.DB, tgId, 'title', session.data);
-    await answerCallback(env, cq.id, 'Edit ulang dari awal.');
-    await sendMessage(env, chatId, '✏️ Mari isi ulang.\n\n' + PROMPTS.title);
+    await answerCallback(env, cq.id);
+    await sendMessage(env, chatId, '✏️ Pilih bagian yang mau diperbaiki:', {
+      reply_markup: wizardFieldsKeyboard(),
+    });
+    return;
+  }
+  // Edit a single field → re-prompt just that field, then return to preview.
+  if (action === 'field') {
+    const step = parts[2] as WizardStep;
+    if (!ORDER.includes(step)) {
+      await answerCallback(env, cq.id, 'Field tidak dikenal.', true);
+      return;
+    }
+    const data = { ...session.data, _edit: true };
+    await setSession(env.DB, tgId, step, data);
+    await answerCallback(env, cq.id);
+    await sendMessage(env, chatId, '✏️ ' + PROMPTS[step], {
+      reply_markup: wizardEditFieldKeyboard(),
+    });
+    return;
+  }
+  // Return to preview (cancel a single-field edit, or from the field picker).
+  if (action === 'preview') {
+    const data = { ...session.data };
+    delete data._edit;
+    await setSession(env.DB, tgId, 'preview', data);
+    await answerCallback(env, cq.id);
+    await showPreview(env, chatId, data);
     return;
   }
   if (action === 'publish') {

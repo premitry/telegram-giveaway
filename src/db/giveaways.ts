@@ -2,7 +2,7 @@ import type { GiveawayRow, GiveawayStatus, WizardData } from '../types';
 import { nowIso } from '../utils/datetime';
 
 /** Create a giveaway in `draft` status from wizard data. Returns the new id. */
-export async function createGiveaway(db: D1Database, data: Required<Omit<WizardData, 'image_file_id' | 'publish_chat_id' | 'description'>> & WizardData): Promise<number> {
+export async function createGiveaway(db: D1Database, data: Required<Omit<WizardData, 'image_file_id' | 'publish_chat_id' | 'description' | '_edit'>> & WizardData): Promise<number> {
   const res = await db
     .prepare(
       `INSERT INTO giveaways

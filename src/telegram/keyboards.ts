@@ -86,3 +86,44 @@ export function previewKeyboard(): InlineKeyboardMarkup {
     ],
   };
 }
+
+/** Preview EDIT → pick a single field to fix (returns to preview after). */
+export function wizardFieldsKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '📝 Judul', callback_data: 'wiz:field:title' },
+        { text: '📄 Deskripsi', callback_data: 'wiz:field:description' },
+      ],
+      [
+        { text: '🎁 Prize', callback_data: 'wiz:field:prize' },
+        { text: '🏆 Winners', callback_data: 'wiz:field:winners_count' },
+      ],
+      [
+        { text: '📢 Channel', callback_data: 'wiz:field:required_channel' },
+        { text: '📅 Deadline', callback_data: 'wiz:field:deadline' },
+      ],
+      [
+        { text: '🎟 Max Bonus', callback_data: 'wiz:field:max_referral_bonus' },
+        { text: '🖼 Gambar', callback_data: 'wiz:field:image' },
+      ],
+      [{ text: '🚀 Tujuan Publish', callback_data: 'wiz:field:publish_dest' }],
+      [{ text: '⬅️ Kembali ke preview', callback_data: 'wiz:preview' }],
+    ],
+  };
+}
+
+/** Buttons under each wizard step prompt: back one step (if allowed) + cancel. */
+export function wizardStepKeyboard(canBack: boolean): InlineKeyboardMarkup {
+  const row: InlineKeyboardButton[] = [];
+  if (canBack) row.push({ text: '⬅️ Kembali', callback_data: 'wiz:back' });
+  row.push({ text: '❌ Batal', callback_data: 'wiz:cancel' });
+  return { inline_keyboard: [row] };
+}
+
+/** Buttons under a single-field edit prompt: cancel → back to preview. */
+export function wizardEditFieldKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[{ text: '⬅️ Batal, kembali ke preview', callback_data: 'wiz:preview' }]],
+  };
+}
