@@ -3,7 +3,7 @@ import { sendMessage } from '../telegram/api';
 import { getExpiredActive, setGiveawayStatus } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { updatePublishedCard } from './giveaway';
-import { drawGiveaway, renderWinnersAnnouncement } from './draw';
+import { drawGiveaway, renderWinnersAnnouncement, notifyWinners } from './draw';
 import { nowIso } from '../utils/datetime';
 
 /**
@@ -27,6 +27,7 @@ export async function runCron(env: Env): Promise<void> {
           const text = await renderWinnersAnnouncement(env, g, winners);
           await sendMessage(env, g.publish_chat_id, text);
         }
+        await notifyWinners(env, g, winners);
         console.log(`cron: auto-drew giveaway #${g.id} (${winners.length} winners)`);
       } else {
         await setGiveawayStatus(env.DB, g.id, 'awaiting_draw');

@@ -23,6 +23,27 @@ export interface PhotoSize {
   file_size?: number;
 }
 
+export interface MessageEntity {
+  type:
+    | 'bold'
+    | 'italic'
+    | 'underline'
+    | 'strikethrough'
+    | 'spoiler'
+    | 'code'
+    | 'pre'
+    | 'text_link'
+    | 'mention'
+    | 'hashtag'
+    | 'url'
+    | 'bot_command'
+    | string;
+  offset: number;
+  length: number;
+  url?: string;
+  language?: string;
+}
+
 export interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
@@ -31,6 +52,8 @@ export interface TelegramMessage {
   text?: string;
   caption?: string;
   photo?: PhotoSize[];
+  entities?: MessageEntity[];
+  caption_entities?: MessageEntity[];
 }
 
 export interface CallbackQuery {

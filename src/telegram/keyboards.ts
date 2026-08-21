@@ -48,6 +48,15 @@ export function joinKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return { inline_keyboard: [[{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }]] };
 }
 
+/**
+ * JOIN button for a CHANNEL post: a deep link that opens the bot in a private
+ * chat (forcing /start), so the bot can DM confirmations & winner notices.
+ */
+export function joinDeepLinkKeyboard(botUsername: string, giveawayId: number): InlineKeyboardMarkup {
+  const url = `https://t.me/${botUsername}?start=g_${giveawayId}`;
+  return { inline_keyboard: [[{ text: '🎉 IKUT GIVEAWAY', url }]] };
+}
+
 /** Shown when the user has not met the channel-join requirement. */
 export function notEligibleKeyboard(giveawayId: number, channelUrl: string): InlineKeyboardMarkup {
   return {

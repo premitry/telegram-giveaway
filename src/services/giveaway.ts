@@ -1,12 +1,13 @@
 import type { Env, GiveawayRow, WizardData } from '../types';
-import { telegram } from '../telegram/api';
-import { joinKeyboard } from '../telegram/keyboards';
+import { telegram, getBotUsername } from '../telegram/api';
+import { joinKeyboard, joinDeepLinkKeyboard } from '../telegram/keyboards';
 import { formatWib } from '../utils/datetime';
-import type { TelegramMessage } from '../telegram/types';
+import { escapeHtml } from '../utils/formatting';
+import { channelUrl } from './membership';
+import type { TelegramMessage, InlineKeyboardMarkup } from '../telegram/types';
 
-export function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+// Re-export so existing importers of escapeHtml from this module keep working.
+export { escapeHtml };
 
 /** Build a synthetic GiveawayRow from wizard data for previewing. */
 export function wizardToPreviewRow(data: WizardData): GiveawayRow {
@@ -35,11 +36,12 @@ export function renderCaption(g: GiveawayRow, participantCount: number): string 
   lines.push(`🎉 <b>${escapeHtml(g.title)}</b>`);
   lines.push('');
   if (g.description && g.description.trim()) {
-    lines.push(escapeHtml(g.description));
+    // description is stored as pre-rendered safe HTML (formatting preserved).
+    lines.push(g.description);
     lines.push('');
   }
   lines.push('🎁 <b>Prize</b>');
-  lines.push(escapeHtml(g.prize));
+  lines.push(g.prize); // pre-rendered safe HTML
   lines.push('');
   lines.push('🏆 <b>Winners</b>');
   lines.push(`${g.winners_count} Orang`);
@@ -48,7 +50,7 @@ export function renderCaption(g: GiveawayRow, participantCount: number): string 
   lines.push(`${participantCount} Participants`);
   lines.push('');
   lines.push('📢 <b>Requirements</b>');
-  lines.push(`Join ${escapeHtml(g.required_channel)}`);
+  lines.push(`Join <a href="${channelUrl(g)}">${escapeHtml(g.required_channel)}</a>`);
   lines.push('');
   lines.push('📅 <b>Winner Selection</b>');
   lines.push(formatWib(g.deadline));
@@ -78,7 +80,10 @@ export async function publishGiveaway(
     return null;
   }
   const caption = renderCaption(giveaway, participantCount);
-  const keyboard = joinKeyboard(giveaway.id);
+  // Channel post: JOIN is a deep-link into the bot so the user is guaranteed to
+  // /start it first (otherwise the bot can't DM confirmations/winner notices).
+  const botUsername = await getBotUsername(env);
+  const keyboard = joinDeepLinkKeyboard(botUsername, giveaway.id);
 
   let res;
   if (giveaway.image_file_id) {
@@ -156,7 +161,11 @@ export async function updatePublishedCard(
 ): Promise<void> {
   if (!giveaway.publish_chat_id || !giveaway.publish_message_id) return;
   const caption = renderCaption(giveaway, participantCount);
-  const reply_markup = keepJoinButton ? joinKeyboard(giveaway.id) : { inline_keyboard: [] };
+  let reply_markup: InlineKeyboardMarkup = { inline_keyboard: [] };
+  if (keepJoinButton) {
+    const botUsername = await getBotUsername(env);
+    reply_markup = joinDeepLinkKeyboard(botUsername, giveaway.id);
+  }
   const base = {
     chat_id: giveaway.publish_chat_id,
     message_id: Number(giveaway.publish_message_id),

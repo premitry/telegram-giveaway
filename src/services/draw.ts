@@ -3,6 +3,8 @@ import { listWeightedParticipants } from '../db/participants';
 import { isChannelMember } from './membership';
 import { drawWinners, type WeightedEntry } from '../utils/random';
 import { getUserById } from '../db/users';
+import { sendMessage } from '../telegram/api';
+import { escapeHtml } from '../utils/formatting';
 import { nowIso } from '../utils/datetime';
 
 export interface DrawnWinner {
@@ -119,4 +121,31 @@ export async function renderWinnersAnnouncement(
   lines.push('');
   lines.push('Selamat kepada para pemenang! 🎊');
   return lines.join('\n');
+}
+
+/**
+ * DM each winner a personal congratulations. Best-effort: a user who never
+ * started the bot (or blocked it) is skipped without failing the draw.
+ * Returns how many notifications were delivered.
+ */
+export async function notifyWinners(
+  env: Env,
+  giveaway: GiveawayRow,
+  winners: DrawnWinner[],
+): Promise<number> {
+  let delivered = 0;
+  for (const w of winners) {
+    const text = [
+      '🎉 <b>SELAMAT!</b>',
+      '',
+      `Kamu menang di giveaway <b>${escapeHtml(giveaway.title)}</b> (posisi #${w.position}).`,
+      `🎁 Hadiah: ${giveaway.prize}`,
+      '',
+      'Admin akan menghubungi kamu untuk klaim hadiah. 🎊',
+    ].join('\n');
+    const res = await sendMessage(env, w.telegramId, text);
+    if (res.ok) delivered++;
+    else console.warn(`notifyWinners: could not DM winner ${w.telegramId}: ${res.description}`);
+  }
+  return delivered;
 }

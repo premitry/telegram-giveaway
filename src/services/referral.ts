@@ -10,15 +10,23 @@ import {
 
 export interface StartPayload {
   giveawayId: number;
-  referrerTelegramId: string;
+  /** null when the link is a plain join deep-link (no referrer). */
+  referrerTelegramId: string | null;
 }
 
-/** Parse a deep-link payload like "g_5_r_12345678". Returns null when not a referral. */
+/**
+ * Parse a deep-link payload. Supports:
+ *   - "g_5"            → plain join (from a channel IKUT button)
+ *   - "g_5_r_12345678" → join credited to a referrer
+ * Returns null when the payload is not a giveaway link.
+ */
 export function parseStartPayload(payload: string | undefined): StartPayload | null {
   if (!payload) return null;
-  const m = payload.match(/^g_(\d+)_r_(\d+)$/);
-  if (!m) return null;
-  return { giveawayId: Number(m[1]), referrerTelegramId: m[2] };
+  const withRef = payload.match(/^g_(\d+)_r_(\d+)$/);
+  if (withRef) return { giveawayId: Number(withRef[1]), referrerTelegramId: withRef[2] };
+  const plain = payload.match(/^g_(\d+)$/);
+  if (plain) return { giveawayId: Number(plain[1]), referrerTelegramId: null };
+  return null;
 }
 
 /**

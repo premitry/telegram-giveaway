@@ -31,13 +31,21 @@ export async function handleStart(env: Env, message: TelegramMessage): Promise<v
   if (referral) {
     const giveaway = await getGiveaway(env.DB, referral.giveawayId);
     if (giveaway && giveaway.status === 'active') {
-      await recordPendingReferral(env.DB, giveaway, referral.referrerTelegramId, user);
       const count = await countParticipants(env.DB, giveaway.id);
-      await sendMessage(
-        env,
-        chatId,
-        '🎁 Kamu diundang teman untuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
-      );
+      if (referral.referrerTelegramId) {
+        await recordPendingReferral(env.DB, giveaway, referral.referrerTelegramId, user);
+        await sendMessage(
+          env,
+          chatId,
+          '🎁 Kamu diundang teman untuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
+        );
+      } else {
+        await sendMessage(
+          env,
+          chatId,
+          '🎁 Yuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
+        );
+      }
       await sendGiveawayCard(env, chatId, giveaway, count);
       return;
     }

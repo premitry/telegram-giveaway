@@ -7,6 +7,7 @@ import {
   drawGiveaway,
   rerollWinner,
   renderWinnersAnnouncement,
+  notifyWinners,
   listWinners,
   type DrawnWinner,
 } from '../services/draw';
@@ -47,7 +48,12 @@ export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]
   if (winners.length === 0) {
     await sendMessage(env, chatId, '⚠️ Tidak ada pemenang eligible (semua kandidat gagal cek membership).');
   } else {
-    await sendMessage(env, chatId, `✅ Draw selesai. ${winners.length} pemenang terpilih & diumumkan.`);
+    const dm = await notifyWinners(env, giveaway, winners);
+    await sendMessage(
+      env,
+      chatId,
+      `✅ Draw selesai. ${winners.length} pemenang terpilih & diumumkan.\n📩 Notif DM terkirim ke ${dm}/${winners.length} pemenang.`,
+    );
   }
 }
 

@@ -12,6 +12,7 @@ import {
   wizardEditFieldKeyboard,
 } from '../telegram/keyboards';
 import { parseWibToUtc, formatWib, isPast } from '../utils/datetime';
+import { entitiesToHtml } from '../utils/formatting';
 
 /** Steps in fill order (preview excluded — it's the terminal step). */
 const ORDER: WizardStep[] = [
@@ -81,6 +82,8 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
   const chatId = message.chat.id;
   const data = session.data;
   const text = (message.text ?? '').trim();
+  // Free-text fields preserve bold/italic/etc. via entity → HTML conversion.
+  const html = (): string => entitiesToHtml(message.text ?? '', message.entities).trim();
 
   // Store the field value, then either return to preview (single-field edit)
   // or advance to the next step.
@@ -106,10 +109,10 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
       if (!text) { await reject('❌ Judul tidak boleh kosong. Coba lagi:'); return true; }
       data.title = text; await commit('description'); return true;
     case 'description':
-      data.description = text === '-' ? null : text; await commit('prize'); return true;
+      data.description = text === '-' ? null : html(); await commit('prize'); return true;
     case 'prize':
       if (!text) { await reject('❌ Prize tidak boleh kosong. Coba lagi:'); return true; }
-      data.prize = text; await commit('winners_count'); return true;
+      data.prize = html(); await commit('winners_count'); return true;
     case 'winners_count': {
       const n = Number.parseInt(text, 10);
       if (!Number.isInteger(n) || n < 1) { await reject('❌ Masukkan angka ≥ 1:'); return true; }
