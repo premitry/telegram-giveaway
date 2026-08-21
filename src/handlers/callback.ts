@@ -17,8 +17,9 @@ import {
   drawListKeyboard,
   drawPickConfirmKeyboard,
   winnersManageKeyboard,
+  publishListKeyboard,
 } from '../telegram/keyboards';
-import { handleWizardCallback, startWizard } from './admin';
+import { handleWizardCallback, startWizard, startRepublish } from './admin';
 import { executeDraw, executeReroll } from './adminDraw';
 import { listWinners, renderWinnersCardBlock } from '../services/draw';
 import { isAdmin } from './auth';
@@ -426,6 +427,17 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       await answerCallback(env, cq.id);
       await show(HOWTO, backKeyboard());
       return;
+    case 'publist': {
+      if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      const list = await listGiveaways(env.DB);
+      if (list.length === 0) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
+      await answerCallback(env, cq.id);
+      await show(
+        '🚀 <b>Publish Ulang</b>\n\nPilih giveaway yang mau dipublish (ulang) ke channel/chat:',
+        publishListKeyboard(list),
+      );
+      return;
+    }
     case 'new':
       if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
       await answerCallback(env, cq.id);
@@ -489,6 +501,9 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
       return;
     case 'drawpick':
       await handleDrawPick(env, cq, giveawayId);
+      return;
+    case 'pubpick':
+      await startRepublish(env, cq, giveawayId);
       return;
     case 'drawcfm':
       await handleDraw(env, cq, giveawayId);

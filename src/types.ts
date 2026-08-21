@@ -88,6 +88,10 @@ export interface WizardData {
   /** Internal: whether the current anchor message is a photo (preview w/ image),
    * so we know to edit its caption vs its text. */
   _anchorPhoto?: boolean;
+  /** Internal: when set, this session is a lightweight "publish ulang" flow for an
+   * existing giveaway (this id) — the next text input is the publish destination,
+   * not a wizard field. */
+  _republishId?: number;
 }
 
 export type WizardStep =

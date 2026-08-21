@@ -56,6 +56,17 @@ export function drawPickConfirmKeyboard(giveawayId: number): InlineKeyboardMarku
   };
 }
 
+/** Picker list of giveaways to (re)publish → capture destination (pubpick:<id>). */
+export function publishListKeyboard(giveaways: GiveawayPick[]): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = giveaways.map((g) => {
+    const icon = STATUS_ICON[g.status] ?? '•';
+    const title = g.title.length > 30 ? g.title.slice(0, 29) + '…' : g.title;
+    return [{ text: `${icon} #${g.id} ${title}`, callback_data: `pubpick:${g.id}` }];
+  });
+  rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
+  return { inline_keyboard: rows };
+}
+
 /** Winners management for an ended giveaway: reroll a position or redraw all. */
 export function winnersManageKeyboard(giveawayId: number, positions: number[]): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = positions.map((p) => [
@@ -93,6 +104,7 @@ export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
       { text: '🎬 Undi Pemenang', callback_data: 'menu:drawlist' },
       { text: '🗑 Hapus Giveaway', callback_data: 'menu:dellist' },
     ]);
+    rows.push([{ text: '🚀 Publish Ulang', callback_data: 'menu:publist' }]);
   }
   return { inline_keyboard: rows };
 }

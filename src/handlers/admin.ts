@@ -2,7 +2,7 @@ import type { Env, WizardData, WizardStep } from '../types';
 import type { CallbackQuery, TelegramMessage, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, telegram, deleteMessage } from '../telegram/api';
 import { getSession, setSession, clearSession } from '../db/sessions';
-import { createGiveaway, getGiveaway, setPublishInfo } from '../db/giveaways';
+import { createGiveaway, getGiveaway, setPublishInfo, setGiveawayStatus } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { renderCaption, wizardToPreviewRow, publishGiveaway } from '../services/giveaway';
 import {
@@ -12,7 +12,7 @@ import {
   wizardEditFieldKeyboard,
 } from '../telegram/keyboards';
 import { parseWibToUtc, formatWib, isPast } from '../utils/datetime';
-import { entitiesToHtml } from '../utils/formatting';
+import { entitiesToHtml, escapeHtml } from '../utils/formatting';
 
 /** Steps in fill order (preview excluded — it's the terminal step).
  * winners_count comes before prize so we know how many per-winner prizes to ask. */
@@ -133,6 +133,80 @@ async function showPreview(env: Env, chatId: number, data: WizardData): Promise<
   const caption = '👁 <b>PREVIEW GIVEAWAY</b>\n\n' + renderCaption(row, 0);
   await renderAnchor(env, chatId, data, caption, previewKeyboard(), row.image_file_id ?? undefined);
 }
+
+/** Channel-publish how-to, reused by the wizard's last step and "publish ulang". */
+const PUBLISH_DEST_HELP =
+  '📢 <b>Ke channel:</b>\n' +
+  '1. Tambahkan bot ini sebagai <b>ADMIN</b> di channel-mu dulu (izin kirim & edit pesan).\n' +
+  '2. Kirim username channel, contoh: <code>@namachannel</code> (atau ID <code>-100xxxxxxxxxx</code>).\n\n' +
+  '💬 <b>Ke chat ini:</b> ketik <code>here</code>.';
+
+/**
+ * Start the "publish ulang" flow for an existing giveaway: prompt (in place) for
+ * a destination, then wait for the admin's text (handled in handleWizardInput).
+ */
+export async function startRepublish(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
+  const chatId = cq.from.id;
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await answerCallback(env, cq.id, 'Giveaway tidak ditemukan.', true);
+    return;
+  }
+  await answerCallback(env, cq.id);
+  const data: WizardData = {
+    _republishId: giveawayId,
+    _anchor: cq.message?.message_id,
+    _anchorPhoto: !!cq.message?.photo,
+  };
+  const prompt =
+    `🚀 <b>Publish ulang #${giveawayId}</b>\n<i>${escapeHtml(giveaway.title)}</i>\n\n${PUBLISH_DEST_HELP}`;
+  await renderAnchor(env, chatId, data, prompt, wizardStepKeyboard(false));
+  await setSession(env.DB, String(cq.from.id), 'publish_dest', data);
+}
+
+/** Publish an existing giveaway to `dest`, replacing any old post, then finish. */
+async function finishRepublish(
+  env: Env,
+  chatId: number,
+  tgId: string,
+  data: WizardData,
+  dest: string,
+): Promise<void> {
+  const giveawayId = data._republishId!;
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await renderAnchor(env, chatId, data, '❌ Giveaway sudah tidak ada.');
+    await clearSession(env.DB, tgId);
+    return;
+  }
+  const count = await countParticipants(env.DB, giveawayId);
+  const published = await publishGiveaway(env, { ...giveaway, publish_chat_id: dest }, count);
+  if (!published) {
+    // Old post (if any) is left untouched — let the admin fix admin rights & retry.
+    await renderAnchor(
+      env,
+      chatId,
+      data,
+      `❌ Gagal publish ke <code>${escapeHtml(dest)}</code>. Pastikan bot sudah jadi <b>ADMIN</b> di channel itu & tujuan benar, lalu kirim ulang:`,
+      wizardStepKeyboard(false),
+    );
+    await setSession(env.DB, tgId, 'publish_dest', data);
+    return;
+  }
+  // New post is live → remove the previous one (best-effort) and point to the new.
+  if (giveaway.publish_chat_id && giveaway.publish_message_id) {
+    await deleteMessage(env, giveaway.publish_chat_id, Number(giveaway.publish_message_id));
+  }
+  await setPublishInfo(env.DB, giveawayId, published.chatId, published.messageId);
+  if (giveaway.status === 'draft') await setGiveawayStatus(env.DB, giveawayId, 'active');
+  await renderAnchor(
+    env,
+    chatId,
+    data,
+    `✅ Giveaway <b>#${giveawayId}</b> berhasil dipublish ke <code>${escapeHtml(dest)}</code>.`,
+  );
+  await clearSession(env.DB, tgId);
+}
 // __APPEND_INPUT__
 
 /**
@@ -149,6 +223,18 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
   // Delete the admin's own input right away so the chat stays a single bubble.
   await deleteMessage(env, chatId, message.message_id);
   const text = (message.text ?? '').trim();
+  // "Publish ulang" flow: the text is the destination for an existing giveaway,
+  // not a wizard field — handle it and stop before the normal wizard switch.
+  if (data._republishId) {
+    const dest = text === 'here' ? String(chatId) : text;
+    if (!dest) {
+      await renderAnchor(env, chatId, data, '❌ Tujuan tidak valid. Kirim <code>@channel</code> / ID, atau <code>here</code>:', wizardStepKeyboard(false));
+      await setSession(env.DB, tgId, 'publish_dest', data);
+      return true;
+    }
+    await finishRepublish(env, chatId, tgId, data, dest);
+    return true;
+  }
   // Free-text fields preserve bold/italic/etc. via entity → HTML conversion.
   const html = (): string => entitiesToHtml(message.text ?? '', message.entities).trim();
 
