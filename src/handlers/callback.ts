@@ -5,7 +5,7 @@ import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '.
 import { getUserByTelegramId } from '../db/users';
 import { countParticipants } from '../db/participants';
 import { joinGiveaway } from '../services/participant';
-import { updatePublishedCard, renderCaption } from '../services/giveaway';
+import { updatePublishedCard, renderCaption, parsePrizes } from '../services/giveaway';
 import { channelUrl } from '../services/membership';
 import {
   notEligibleKeyboard,
@@ -311,6 +311,7 @@ async function showWinnersManage(
   const block = await renderWinnersCardBlock(
     env,
     winners.map((w) => ({ position: w.position, userId: w.user_id })),
+    parsePrizes(giveaway),
   );
   const lines: string[] = [];
   if (note) { lines.push(note); lines.push(''); }

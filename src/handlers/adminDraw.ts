@@ -10,7 +10,7 @@ import {
   notifyWinners,
   listWinners,
 } from '../services/draw';
-import { updatePublishedCard } from '../services/giveaway';
+import { updatePublishedCard, parsePrizes } from '../services/giveaway';
 import { getUserById } from '../db/users';
 
 /** Resolve the target giveaway from an optional numeric id argument. */
@@ -32,7 +32,7 @@ export async function executeDraw(
   await setGiveawayStatus(env.DB, giveaway.id, 'ended');
 
   const count = await countParticipants(env.DB, giveaway.id);
-  const winnersHtml = await renderWinnersCardBlock(env, winners);
+  const winnersHtml = await renderWinnersCardBlock(env, winners, parsePrizes(giveaway));
   await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
 
   const delivered = winners.length > 0 ? await notifyWinners(env, giveaway, winners) : 0;
@@ -56,6 +56,7 @@ export async function executeReroll(
     const winnersHtml = await renderWinnersCardBlock(
       env,
       winners.map((w) => ({ position: w.position, userId: w.user_id })),
+      parsePrizes(giveaway),
     );
     const count = await countParticipants(env.DB, giveaway.id);
     await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);

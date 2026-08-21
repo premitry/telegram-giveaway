@@ -35,6 +35,8 @@ export interface GiveawayRow {
   status: GiveawayStatus;
   auto_draw: number;
   created_at: string;
+  /** JSON array of per-winner prizes (index = position-1). NULL = use `prize`. */
+  prizes_json: string | null;
 }
 
 export interface ParticipantRow {
@@ -69,6 +71,8 @@ export interface WizardData {
   title?: string;
   description?: string | null;
   prize?: string;
+  /** Per-winner prizes collected one at a time (index = position-1). */
+  prizes?: string[];
   winners_count?: number;
   required_channel?: string;
   deadline?: string; // UTC ISO

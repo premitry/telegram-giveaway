@@ -1,19 +1,34 @@
-import type { GiveawayRow, GiveawayStatus, WizardData } from '../types';
+import type { GiveawayRow, GiveawayStatus } from '../types';
 import { nowIso } from '../utils/datetime';
 
-/** Create a giveaway in `draft` status from wizard data. Returns the new id. */
-export async function createGiveaway(db: D1Database, data: Required<Omit<WizardData, 'image_file_id' | 'publish_chat_id' | 'description' | '_edit' | '_anchor' | '_anchorPhoto'>> & WizardData): Promise<number> {
+/** Fields needed to persist a new giveaway (already normalized from the wizard). */
+export interface NewGiveaway {
+  title: string;
+  description: string | null;
+  prize: string;
+  prizes_json: string | null;
+  winners_count: number;
+  required_channel: string;
+  deadline: string;
+  max_referral_bonus: number;
+  image_file_id: string | null;
+  publish_chat_id: string | null;
+}
+
+/** Create a giveaway in `draft` status. Returns the new id. */
+export async function createGiveaway(db: D1Database, data: NewGiveaway): Promise<number> {
   const res = await db
     .prepare(
       `INSERT INTO giveaways
-         (title, description, prize, winners_count, required_channel, deadline,
+         (title, description, prize, prizes_json, winners_count, required_channel, deadline,
           max_referral_bonus, image_file_id, publish_chat_id, status, auto_draw, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)`,
     )
     .bind(
       data.title,
       data.description ?? null,
       data.prize,
+      data.prizes_json ?? null,
       data.winners_count,
       data.required_channel,
       data.deadline,

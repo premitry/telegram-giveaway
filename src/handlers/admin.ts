@@ -14,12 +14,13 @@ import {
 import { parseWibToUtc, formatWib, isPast } from '../utils/datetime';
 import { entitiesToHtml } from '../utils/formatting';
 
-/** Steps in fill order (preview excluded — it's the terminal step). */
+/** Steps in fill order (preview excluded — it's the terminal step).
+ * winners_count comes before prize so we know how many per-winner prizes to ask. */
 const ORDER: WizardStep[] = [
   'title',
   'description',
-  'prize',
   'winners_count',
+  'prize',
   'required_channel',
   'deadline',
   'image',
@@ -29,8 +30,9 @@ const ORDER: WizardStep[] = [
 const PROMPTS: Record<WizardStep, string> = {
   title: '📝 <b>1/8</b> Kirim <b>JUDUL</b> giveaway:',
   description: '📝 <b>2/8</b> Kirim <b>DESKRIPSI</b> (atau ketik <code>-</code> untuk kosong):',
-  prize: '🎁 <b>3/8</b> Kirim <b>PRIZE</b> (hadiah):',
-  winners_count: '🏆 <b>4/8</b> Berapa jumlah <b>WINNERS</b>? (angka)',
+  winners_count: '🏆 <b>3/8</b> Berapa jumlah <b>PEMENANG</b>? (angka)',
+  // prize is asked once per winner — the live prompt is built by prizePrompt().
+  prize: '🎁 <b>4/8</b> Kirim <b>HADIAH</b>:',
   required_channel: '📢 <b>5/8</b> <b>REQUIRED CHANNEL</b> (contoh: <code>@namachannel</code>):',
   deadline:
     '📅 <b>6/8</b> <b>DEADLINE</b> WIB, format <code>YYYY-MM-DD HH:MM</code>\nContoh: <code>2026-08-17 20:00</code>',
@@ -39,6 +41,14 @@ const PROMPTS: Record<WizardStep, string> = {
     '🚀 <b>8/8</b> Publish ke mana? Kirim <code>@channel</code> / chat id, atau <code>here</code> untuk chat ini:',
   preview: '',
 };
+
+/** Live prompt for the current per-winner prize (position = collected + 1). */
+function prizePrompt(data: WizardData): string {
+  const total = data.winners_count ?? 1;
+  const pos = (data.prizes?.length ?? 0) + 1;
+  if (total <= 1) return '🎁 <b>4/8</b> Kirim <b>HADIAH</b> untuk pemenang:';
+  return `🎁 <b>4/8</b> Kirim <b>HADIAH untuk Pemenang #${pos}</b> (dari ${total}):`;
+}
 
 export async function startWizard(env: Env, chatId: number, tgId: string): Promise<void> {
   const data: WizardData = {};
@@ -95,6 +105,11 @@ async function renderAnchor(
 
 /** Show the prompt for a step in the anchor, with back/cancel controls. */
 async function promptStep(env: Env, chatId: number, step: WizardStep, data: WizardData): Promise<void> {
+  if (step === 'prize') {
+    // Prize can always go back (to winners_count, or to the previous prize).
+    await renderAnchor(env, chatId, data, prizePrompt(data), wizardStepKeyboard(true));
+    return;
+  }
   const canBack = ORDER.indexOf(step) > 0;
   await renderAnchor(env, chatId, data, PROMPTS[step], wizardStepKeyboard(canBack));
 }
@@ -146,14 +161,38 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
       if (!text) { await reject('❌ Judul tidak boleh kosong. Coba lagi:'); return true; }
       data.title = text; await commit('description'); return true;
     case 'description':
-      data.description = text === '-' ? null : html(); await commit('prize'); return true;
-    case 'prize':
-      if (!text) { await reject('❌ Prize tidak boleh kosong. Coba lagi:'); return true; }
-      data.prize = html(); await commit('winners_count'); return true;
+      data.description = text === '-' ? null : html(); await commit('winners_count'); return true;
     case 'winners_count': {
       const n = Number.parseInt(text, 10);
       if (!Number.isInteger(n) || n < 1) { await reject('❌ Masukkan angka ≥ 1:'); return true; }
-      data.winners_count = n; await commit('required_channel'); return true;
+      data.winners_count = n;
+      // Winner count drives how many prizes we collect → (re)start prize collection.
+      data.prizes = [];
+      await promptStep(env, chatId, 'prize', data);
+      await setSession(env.DB, tgId, 'prize', data);
+      return true;
+    }
+    case 'prize': {
+      if (!text) { await reject('❌ Hadiah tidak boleh kosong. Coba lagi:'); return true; }
+      if (!data.prizes) data.prizes = [];
+      data.prizes.push(html());
+      const total = data.winners_count ?? 1;
+      if (data.prizes.length < total) {
+        // Ask the next winner's prize — stay on the prize step.
+        await renderAnchor(env, chatId, data, prizePrompt(data), wizardStepKeyboard(true));
+        await setSession(env.DB, tgId, 'prize', data);
+        return true;
+      }
+      // All per-winner prizes collected.
+      if (data._edit) {
+        delete data._edit;
+        await showPreview(env, chatId, data);
+        await setSession(env.DB, tgId, 'preview', data);
+      } else {
+        await promptStep(env, chatId, 'required_channel', data);
+        await setSession(env.DB, tgId, 'required_channel', data);
+      }
+      return true;
     }
     case 'required_channel': {
       let ch = text;
@@ -210,6 +249,15 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
   }
   // Go back one step during the initial fill (data preserved).
   if (action === 'back') {
+    // On the prize step: if we've already collected some prizes, "back" undoes the
+    // last one instead of leaving the step; only step back to winners_count when none.
+    if (session.step === 'prize' && (session.data.prizes?.length ?? 0) > 0) {
+      session.data.prizes!.pop();
+      await answerCallback(env, cq.id);
+      await renderAnchor(env, chatId, session.data, prizePrompt(session.data), wizardStepKeyboard(true));
+      await setSession(env.DB, tgId, 'prize', session.data);
+      return;
+    }
     const idx = ORDER.indexOf(session.step);
     if (idx <= 0) {
       await answerCallback(env, cq.id, 'Sudah di langkah pertama.', true);
@@ -237,6 +285,13 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
     }
     const data = { ...session.data, _edit: true };
     await answerCallback(env, cq.id);
+    // Editing the prize means re-collecting one prize per winner from scratch.
+    if (step === 'prize') {
+      data.prizes = [];
+      await renderAnchor(env, chatId, data, '✏️ ' + prizePrompt(data), wizardStepKeyboard(false));
+      await setSession(env.DB, tgId, 'prize', data);
+      return;
+    }
     await renderAnchor(env, chatId, data, '✏️ ' + PROMPTS[step], wizardEditFieldKeyboard());
     await setSession(env.DB, tgId, step, data);
     return;
@@ -252,13 +307,21 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
   }
   if (action === 'publish') {
     const d = session.data;
-    if (!d.title || !d.prize || !d.winners_count || !d.required_channel || !d.deadline || !d.publish_chat_id) {
+    const prizes = d.prizes && d.prizes.length ? d.prizes : (d.prize ? [d.prize] : []);
+    if (
+      !d.title || !d.winners_count || !d.required_channel || !d.deadline || !d.publish_chat_id ||
+      prizes.length !== d.winners_count
+    ) {
       await answerCallback(env, cq.id, 'Data belum lengkap.', true);
       return;
     }
     await answerCallback(env, cq.id, 'Publishing…');
+    // For a multi-winner giveaway the shared `prize` becomes a numbered list (used
+    // in fallbacks/legacy displays); the per-winner truth lives in prizes_json.
+    const prizeText = prizes.length > 1 ? prizes.map((p, i) => `${i + 1}. ${p}`).join('\n') : prizes[0];
     const id = await createGiveaway(env.DB, {
-      title: d.title, description: d.description ?? null, prize: d.prize,
+      title: d.title, description: d.description ?? null, prize: prizeText,
+      prizes_json: prizes.length > 1 ? JSON.stringify(prizes) : null,
       winners_count: d.winners_count, required_channel: d.required_channel,
       deadline: d.deadline, max_referral_bonus: d.max_referral_bonus ?? 5,
       image_file_id: d.image_file_id ?? null, publish_chat_id: d.publish_chat_id,

@@ -5,6 +5,7 @@ import { drawWinners, type WeightedEntry } from '../utils/random';
 import { getUserById } from '../db/users';
 import { sendMessage } from '../telegram/api';
 import { escapeHtml } from '../utils/formatting';
+import { prizeForPosition } from './giveaway';
 import { nowIso } from '../utils/datetime';
 
 export interface DrawnWinner {
@@ -109,8 +110,10 @@ export async function listWinners(env: Env, giveawayId: number): Promise<WinnerR
 export async function renderWinnersCardBlock(
   env: Env,
   winners: { position: number; userId: number }[],
+  prizes?: string[],
 ): Promise<string> {
   if (winners.length === 0) return '';
+  const perWinnerPrize = !!prizes && prizes.length > 1;
   const sorted = [...winners].sort((a, b) => a.position - b.position);
   const lines: string[] = [];
   for (const w of sorted) {
@@ -118,7 +121,11 @@ export async function renderWinnersCardBlock(
     const handle = user?.username
       ? `@${escapeHtml(user.username)}`
       : `<a href="tg://user?id=${user?.telegram_id ?? ''}">${escapeHtml(user?.first_name ?? 'Winner')}</a>`;
-    lines.push(`🥇 ${w.position}. ${handle}`);
+    let line = `🥇 ${w.position}. ${handle}`;
+    if (perWinnerPrize && prizes![w.position - 1]) {
+      line += ` → 🎁 ${prizes![w.position - 1]}`;
+    }
+    lines.push(line);
   }
   return lines.join('\n');
 }
@@ -139,7 +146,7 @@ export async function notifyWinners(
       '🎉 <b>SELAMAT!</b>',
       '',
       `Kamu menang di giveaway <b>${escapeHtml(giveaway.title)}</b> (posisi #${w.position}).`,
-      `🎁 Hadiah: ${giveaway.prize}`,
+      `🎁 Hadiah: ${prizeForPosition(giveaway, w.position)}`,
       '',
       'Admin akan menghubungi kamu untuk klaim hadiah. 🎊',
     ].join('\n');

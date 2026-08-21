@@ -9,13 +9,45 @@ import type { TelegramMessage, InlineKeyboardMarkup } from '../telegram/types';
 // Re-export so existing importers of escapeHtml from this module keep working.
 export { escapeHtml };
 
+/**
+ * Per-winner prizes for a giveaway. Falls back to the single shared `prize`
+ * (one entry) when no per-winner list was configured.
+ */
+export function parsePrizes(g: GiveawayRow): string[] {
+  if (g.prizes_json) {
+    try {
+      const arr = JSON.parse(g.prizes_json);
+      if (Array.isArray(arr) && arr.length > 0) return arr.map((p) => String(p));
+    } catch {
+      /* fall through to the single prize */
+    }
+  }
+  return [g.prize];
+}
+
+/** Prize text for a specific winner position (1-indexed); falls back to `prize`. */
+export function prizeForPosition(g: GiveawayRow, position: number): string {
+  const prizes = parsePrizes(g);
+  return prizes[position - 1] ?? g.prize;
+}
+
+/** Render the "🎁 Prize" block: a numbered list when prizes differ per winner. */
+function renderPrizeBlock(g: GiveawayRow): string[] {
+  const prizes = parsePrizes(g);
+  if (prizes.length <= 1) return ['🎁 <b>Prize</b>', g.prize];
+  const lines = ['🎁 <b>Prize</b>'];
+  prizes.forEach((p, i) => lines.push(`${i + 1}. ${p}`)); // prizes are pre-rendered safe HTML
+  return lines;
+}
+
 /** Build a synthetic GiveawayRow from wizard data for previewing. */
 export function wizardToPreviewRow(data: WizardData): GiveawayRow {
+  const prizes = data.prizes && data.prizes.length ? data.prizes : undefined;
   return {
     id: 0,
     title: data.title ?? '(untitled)',
     description: data.description ?? null,
-    prize: data.prize ?? '-',
+    prize: prizes ? prizes[0] : (data.prize ?? '-'),
     winners_count: data.winners_count ?? 1,
     required_channel: data.required_channel ?? '-',
     required_channel_id: null,
@@ -27,6 +59,7 @@ export function wizardToPreviewRow(data: WizardData): GiveawayRow {
     status: 'draft',
     auto_draw: 0,
     created_at: new Date().toISOString(),
+    prizes_json: prizes && prizes.length > 1 ? JSON.stringify(prizes) : null,
   };
 }
 
@@ -41,8 +74,7 @@ export function renderCaption(g: GiveawayRow, participantCount: number, winnersH
     lines.push(g.description);
     lines.push('');
   }
-  lines.push('🎁 <b>Prize</b>');
-  lines.push(g.prize); // pre-rendered safe HTML
+  lines.push(...renderPrizeBlock(g));
   lines.push('');
   lines.push('🏆 <b>Winners</b>');
   lines.push(`${g.winners_count} Orang`);
