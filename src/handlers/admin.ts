@@ -103,15 +103,25 @@ async function renderAnchor(
   }
 }
 
-/** Show the prompt for a step in the anchor, with back/cancel controls. */
+/** Show the prompt for a step in the anchor, with back/cancel controls. The
+ * anchor also carries a LIVE preview of the giveaway card built from what's been
+ * entered so far, so the admin watches it take shape while filling. */
 async function promptStep(env: Env, chatId: number, step: WizardStep, data: WizardData): Promise<void> {
-  if (step === 'prize') {
-    // Prize can always go back (to winners_count, or to the previous prize).
-    await renderAnchor(env, chatId, data, prizePrompt(data), wizardStepKeyboard(true));
-    return;
-  }
-  const canBack = ORDER.indexOf(step) > 0;
-  await renderAnchor(env, chatId, data, PROMPTS[step], wizardStepKeyboard(canBack));
+  const prompt = step === 'prize' ? prizePrompt(data) : PROMPTS[step];
+  // Prize can always go back (to winners_count, or to the previous prize).
+  const canBack = step === 'prize' ? true : ORDER.indexOf(step) > 0;
+  await renderAnchor(env, chatId, data, livePreviewBody(data, prompt), wizardStepKeyboard(canBack));
+}
+
+/**
+ * Anchor body during fill/edit: the live giveaway card (rendered from the data
+ * so far) with the current prompt below a divider. Kept text-only (no photo) so
+ * the growing card stays inside the 4096-char text limit — the image is shown in
+ * the final preview instead.
+ */
+function livePreviewBody(data: WizardData, prompt: string): string {
+  const card = renderCaption(wizardToPreviewRow(data), 0);
+  return `${card}\n\n➖➖➖➖➖➖➖\n${prompt}`;
 }
 
 async function showPreview(env: Env, chatId: number, data: WizardData): Promise<void> {
@@ -179,7 +189,7 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
       const total = data.winners_count ?? 1;
       if (data.prizes.length < total) {
         // Ask the next winner's prize — stay on the prize step.
-        await renderAnchor(env, chatId, data, prizePrompt(data), wizardStepKeyboard(true));
+        await renderAnchor(env, chatId, data, livePreviewBody(data, prizePrompt(data)), wizardStepKeyboard(true));
         await setSession(env.DB, tgId, 'prize', data);
         return true;
       }
@@ -254,7 +264,7 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
     if (session.step === 'prize' && (session.data.prizes?.length ?? 0) > 0) {
       session.data.prizes!.pop();
       await answerCallback(env, cq.id);
-      await renderAnchor(env, chatId, session.data, prizePrompt(session.data), wizardStepKeyboard(true));
+      await renderAnchor(env, chatId, session.data, livePreviewBody(session.data, prizePrompt(session.data)), wizardStepKeyboard(true));
       await setSession(env.DB, tgId, 'prize', session.data);
       return;
     }
@@ -288,11 +298,11 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
     // Editing the prize means re-collecting one prize per winner from scratch.
     if (step === 'prize') {
       data.prizes = [];
-      await renderAnchor(env, chatId, data, '✏️ ' + prizePrompt(data), wizardStepKeyboard(false));
+      await renderAnchor(env, chatId, data, livePreviewBody(data, '✏️ ' + prizePrompt(data)), wizardStepKeyboard(false));
       await setSession(env.DB, tgId, 'prize', data);
       return;
     }
-    await renderAnchor(env, chatId, data, '✏️ ' + PROMPTS[step], wizardEditFieldKeyboard());
+    await renderAnchor(env, chatId, data, livePreviewBody(data, '✏️ ' + PROMPTS[step]), wizardEditFieldKeyboard());
     await setSession(env.DB, tgId, step, data);
     return;
   }
