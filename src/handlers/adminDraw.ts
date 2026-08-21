@@ -19,6 +19,26 @@ export async function resolveTarget(env: Env, args: string[]): Promise<GiveawayR
   return getLatestGiveaway(env.DB);
 }
 
+/**
+ * Core draw: secure weighted pick with a fresh membership re-check, persist
+ * winners, embed them in the published card, end the giveaway, and DM winners.
+ * Shared by the /draw command and the button-driven draw flow.
+ */
+export async function executeDraw(
+  env: Env,
+  giveaway: GiveawayRow,
+): Promise<{ winners: Awaited<ReturnType<typeof drawGiveaway>>; delivered: number }> {
+  const winners = await drawGiveaway(env, giveaway);
+  await setGiveawayStatus(env.DB, giveaway.id, 'ended');
+
+  const count = await countParticipants(env.DB, giveaway.id);
+  const winnersHtml = await renderWinnersCardBlock(env, winners);
+  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
+
+  const delivered = winners.length > 0 ? await notifyWinners(env, giveaway, winners) : 0;
+  return { winners, delivered };
+}
+
 /** /draw [id] — re-check membership, draw winners securely, show them in the card, end giveaway. */
 export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]): Promise<void> {
   const chatId = message.chat.id;
@@ -30,22 +50,15 @@ export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]
   }
 
   await sendMessage(env, chatId, '🎲 Mengundi pemenang (mengecek ulang membership)…');
-  const winners = await drawGiveaway(env, giveaway);
-  await setGiveawayStatus(env.DB, giveaway.id, 'ended');
-
-  const count = await countParticipants(env.DB, giveaway.id);
-  const winnersHtml = await renderWinnersCardBlock(env, winners);
-  // Winners are embedded straight into the published card (no separate post).
-  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
+  const { winners, delivered } = await executeDraw(env, giveaway);
 
   if (winners.length === 0) {
     await sendMessage(env, chatId, '⚠️ Tidak ada pemenang eligible (semua kandidat gagal cek membership).');
   } else {
-    const dm = await notifyWinners(env, giveaway, winners);
     await sendMessage(
       env,
       chatId,
-      `✅ Draw selesai. ${winners.length} pemenang terpilih & ditampilkan di kartu giveaway.\n📩 Notif DM terkirim ke ${dm}/${winners.length} pemenang.`,
+      `✅ Draw selesai. ${winners.length} pemenang terpilih & ditampilkan di kartu giveaway.\n📩 Notif DM terkirim ke ${delivered}/${winners.length} pemenang.`,
     );
   }
 }

@@ -21,8 +21,11 @@ import {
   entriesMenuKeyboard,
   deleteListKeyboard,
   deletePickConfirmKeyboard,
+  drawListKeyboard,
+  drawPickConfirmKeyboard,
 } from '../telegram/keyboards';
 import { handleWizardCallback, startWizard } from './admin';
+import { executeDraw } from './adminDraw';
 import { isAdmin } from './auth';
 import { WELCOME } from './start';
 
@@ -272,6 +275,79 @@ async function handleDeletePick(env: Env, cq: CallbackQuery, giveawayId: number)
   }
 }
 
+/** Show the confirm view for a giveaway picked from the draw list (in place). */
+async function handleDrawPick(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  const g = await getGiveaway(env.DB, giveawayId);
+  if (!g) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return;
+  }
+  if (g.status !== 'active' && g.status !== 'awaiting_draw') {
+    await answerCallback(env, cq.id, `Status ${g.status} — tidak bisa diundi.`, true);
+    return;
+  }
+  await answerCallback(env, cq.id);
+  const count = await countParticipants(env.DB, g.id);
+  const text = [
+    `🎬 <b>Undi pemenang giveaway #${g.id}?</b>`,
+    `<i>${g.title}</i>`,
+    '',
+    `Status: <b>${g.status}</b> • Peserta: <b>${count}</b> • Pemenang: <b>${g.winners_count}</b>`,
+    '',
+    'Bot cek ulang membership channel tiap kandidat, pilih pemenang acak (berbobot sesuai entry), tampilkan di kartu & DM pemenang. Giveaway jadi <b>ended</b>.',
+  ].join('\n');
+  const msg = cq.message;
+  if (msg) {
+    await editMessageText(env, cq.from.id, msg.message_id, text, {
+      reply_markup: drawPickConfirmKeyboard(g.id),
+    });
+  } else {
+    await sendMessage(env, cq.from.id, text, { reply_markup: drawPickConfirmKeyboard(g.id) });
+  }
+}
+
+/** Run the draw for a confirmed giveaway (admin-only), report the result in place. */
+async function handleDraw(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
+  const msg = cq.message;
+  const editSelf = (text: string): Promise<unknown> =>
+    msg
+      ? editMessageText(env, cq.from.id, msg.message_id, text, { reply_markup: backKeyboard() })
+      : sendMessage(env, cq.from.id, text, { reply_markup: backKeyboard() });
+
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  const g = await getGiveaway(env.DB, giveawayId);
+  if (!g) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return;
+  }
+  if (g.status !== 'active' && g.status !== 'awaiting_draw') {
+    await answerCallback(env, cq.id, `Status ${g.status} — tidak bisa diundi.`, true);
+    await editSelf(`ℹ️ Giveaway #${g.id} berstatus <b>${g.status}</b>, tidak bisa diundi.`);
+    return;
+  }
+
+  await answerCallback(env, cq.id, '🎲 Mengundi…');
+  const { winners, delivered } = await executeDraw(env, g);
+  if (winners.length === 0) {
+    await editSelf('⚠️ Tidak ada pemenang eligible (semua kandidat gagal cek membership).');
+    return;
+  }
+  await editSelf(
+    [
+      `✅ <b>Draw #${g.id} selesai!</b>`,
+      `${winners.length} pemenang terpilih & tampil di kartu giveaway.`,
+      `📩 Notif DM terkirim ke ${delivered}/${winners.length} pemenang.`,
+    ].join('\n'),
+  );
+}
+
 /** Handle the /start main-menu buttons — navigates in place (edits the same message). */
 async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<void> {
   const chatId = cq.from.id;
@@ -310,6 +386,19 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       await show(
         '🗑 <b>Hapus Giveaway</b>\n\nPilih giveaway yang mau dihapus (permanen):',
         deleteListKeyboard(list),
+      );
+      return;
+    }
+    case 'drawlist': {
+      if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      const list = (await listGiveaways(env.DB)).filter(
+        (g) => g.status === 'active' || g.status === 'awaiting_draw',
+      );
+      if (list.length === 0) { await answerCallback(env, cq.id, 'Belum ada giveaway yang bisa diundi.', true); return; }
+      await answerCallback(env, cq.id);
+      await show(
+        '🎬 <b>Undi Pemenang</b>\n\nPilih giveaway yang mau diundi:',
+        drawListKeyboard(list),
       );
       return;
     }
@@ -400,6 +489,12 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
       return;
     case 'delpick':
       await handleDeletePick(env, cq, giveawayId);
+      return;
+    case 'drawpick':
+      await handleDrawPick(env, cq, giveawayId);
+      return;
+    case 'drawcfm':
+      await handleDraw(env, cq, giveawayId);
       return;
     case 'delcfm':
       await handleDelete(env, cq, giveawayId, true);

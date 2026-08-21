@@ -35,6 +35,27 @@ export function deletePickConfirmKeyboard(giveawayId: number): InlineKeyboardMar
   };
 }
 
+/** Picker list of drawable giveaways → confirm draw (drawpick:<id>). */
+export function drawListKeyboard(giveaways: GiveawayPick[]): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = giveaways.map((g) => {
+    const icon = STATUS_ICON[g.status] ?? '•';
+    const title = g.title.length > 30 ? g.title.slice(0, 29) + '…' : g.title;
+    return [{ text: `${icon} #${g.id} ${title}`, callback_data: `drawpick:${g.id}` }];
+  });
+  rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
+  return { inline_keyboard: rows };
+}
+
+/** Confirm buttons for drawing a specific picked giveaway (back → list). */
+export function drawPickConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🎬 Ya, undi pemenang', callback_data: `drawcfm:${giveawayId}` }],
+      [{ text: '⬅️ Kembali ke daftar', callback_data: 'menu:drawlist' }],
+    ],
+  };
+}
+
 /** Confirm/cancel buttons for the destructive /delete command. */
 export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return {
@@ -59,6 +80,7 @@ export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
       { text: '➕ Buat Giveaway', callback_data: 'menu:new' },
       { text: '📊 Statistik', callback_data: 'menu:stats' },
     ]);
+    rows.push([{ text: '🎬 Undi Pemenang', callback_data: 'menu:drawlist' }]);
     rows.push([{ text: '🗑 Hapus Giveaway', callback_data: 'menu:dellist' }]);
   }
   return { inline_keyboard: rows };
@@ -74,7 +96,10 @@ export function activeMenuKeyboard(giveawayId: number, admin = false): InlineKey
   const rows: InlineKeyboardButton[][] = [
     [{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }],
   ];
-  if (admin) rows.push([{ text: '🗑 Hapus Giveaway Ini', callback_data: `delpick:${giveawayId}` }]);
+  if (admin) {
+    rows.push([{ text: '🎬 Undi Pemenang Ini', callback_data: `drawpick:${giveawayId}` }]);
+    rows.push([{ text: '🗑 Hapus Giveaway Ini', callback_data: `delpick:${giveawayId}` }]);
+  }
   rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
   return { inline_keyboard: rows };
 }
