@@ -27,25 +27,17 @@ export interface WeightedEntry {
 }
 
 /**
- * Secure weighted random selection without replacement.
- * A candidate with `entries = 4` is 4x as likely to be picked as one with `entries = 1`.
+ * Secure UNWEIGHTED random selection without replacement — every candidate has
+ * an equal chance regardless of their entry count (referrals/invites do NOT
+ * boost odds). The `entries` field is kept for display only.
  * Already-selected winners are removed from the pool before the next pick.
  */
 export function drawWinners(pool: WeightedEntry[], count: number): WeightedEntry[] {
-  const remaining = pool.filter((p) => p.entries > 0);
+  const remaining = [...pool];
   const winners: WeightedEntry[] = [];
 
   while (winners.length < count && remaining.length > 0) {
-    const total = remaining.reduce((sum, p) => sum + p.entries, 0);
-    if (total <= 0) break;
-
-    let target = secureRandomBelow(total);
-    let idx = 0;
-    for (; idx < remaining.length; idx++) {
-      target -= remaining[idx].entries;
-      if (target < 0) break;
-    }
-    if (idx >= remaining.length) idx = remaining.length - 1; // safety guard
+    const idx = secureRandomBelow(remaining.length);
     winners.push(remaining[idx]);
     remaining.splice(idx, 1);
   }

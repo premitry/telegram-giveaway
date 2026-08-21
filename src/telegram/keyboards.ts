@@ -56,6 +56,16 @@ export function drawPickConfirmKeyboard(giveawayId: number): InlineKeyboardMarku
   };
 }
 
+/** Winners management for an ended giveaway: reroll a position or redraw all. */
+export function winnersManageKeyboard(giveawayId: number, positions: number[]): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = positions.map((p) => [
+    { text: `🔁 Undi Ulang #${p}`, callback_data: `rrpos:${giveawayId}:${p}` },
+  ]);
+  rows.push([{ text: '🔁 Undi Ulang Semua', callback_data: `rrall:${giveawayId}` }]);
+  rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:drawlist' }]);
+  return { inline_keyboard: rows };
+}
+
 /** Confirm/cancel buttons for the destructive /delete command. */
 export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return {

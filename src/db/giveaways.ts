@@ -8,7 +8,7 @@ export async function createGiveaway(db: D1Database, data: Required<Omit<WizardD
       `INSERT INTO giveaways
          (title, description, prize, winners_count, required_channel, deadline,
           max_referral_bonus, image_file_id, publish_chat_id, status, auto_draw, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 0, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?)`,
     )
     .bind(
       data.title,

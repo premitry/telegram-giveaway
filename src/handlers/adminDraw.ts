@@ -39,6 +39,31 @@ export async function executeDraw(
   return { winners, delivered };
 }
 
+/**
+ * Reroll a single winner position: pick a replacement (excluding current
+ * winners, re-checking membership), refresh the card, and DM the new winner.
+ * Shared by /reroll and the button-driven reroll. Returns the replacement (or
+ * null if no eligible candidate) plus the up-to-date winners list.
+ */
+export async function executeReroll(
+  env: Env,
+  giveaway: GiveawayRow,
+  position: number,
+): Promise<{ replacement: Awaited<ReturnType<typeof rerollWinner>>; winners: Awaited<ReturnType<typeof listWinners>> }> {
+  const replacement = await rerollWinner(env, giveaway, position);
+  const winners = await listWinners(env, giveaway.id);
+  if (replacement) {
+    const winnersHtml = await renderWinnersCardBlock(
+      env,
+      winners.map((w) => ({ position: w.position, userId: w.user_id })),
+    );
+    const count = await countParticipants(env.DB, giveaway.id);
+    await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
+    await notifyWinners(env, giveaway, [replacement]);
+  }
+  return { replacement, winners };
+}
+
 /** /draw [id] — re-check membership, draw winners securely, show them in the card, end giveaway. */
 export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]): Promise<void> {
   const chatId = message.chat.id;
@@ -74,24 +99,16 @@ export async function cmdReroll(env: Env, message: TelegramMessage, args: string
   const giveaway = await resolveTarget(env, args.slice(1));
   if (!giveaway) { await sendMessage(env, chatId, '❌ Giveaway tidak ditemukan.'); return; }
 
-  const replacement = await rerollWinner(env, giveaway, position);
+  const { replacement, winners } = await executeReroll(env, giveaway, position);
   if (!replacement) {
     await sendMessage(env, chatId, '⚠️ Tidak ada kandidat pengganti yang eligible.');
     return;
   }
   const user = await getUserById(env.DB, replacement.userId);
   const handle = user?.username ? `@${user.username}` : (user?.first_name ?? 'Winner');
-  const winners = await listWinners(env, giveaway.id);
-  // Refresh the embedded winners list in the card.
-  const winnersHtml = await renderWinnersCardBlock(
-    env,
-    winners.map((w) => ({ position: w.position, userId: w.user_id })),
-  );
-  const count = await countParticipants(env.DB, giveaway.id);
-  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
   await sendMessage(
     env,
     chatId,
-    `🔁 Posisi #${position} diganti menjadi <b>${handle}</b> (${replacement.entries} 🎟).\nKartu giveaway diperbarui. Total pemenang: ${winners.length}.`,
+    `🔁 Posisi #${position} diganti menjadi <b>${handle}</b>.\nKartu giveaway diperbarui & pemenang baru dinotif. Total pemenang: ${winners.length}.`,
   );
 }
