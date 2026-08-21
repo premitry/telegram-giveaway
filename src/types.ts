@@ -78,9 +78,12 @@ export interface WizardData {
   /** Internal: set while editing a single field from the preview, so the next
    * valid input returns to the preview instead of advancing to the next step. */
   _edit?: boolean;
-  /** Internal: message ids (admin's private chat) sent/received during the
-   * wizard, deleted on publish/cancel so the chat stays clean. */
-  _msgs?: number[];
+  /** Internal: id of the single "anchor" message that the wizard edits in place
+   * as steps advance (so the chat doesn't pile up). */
+  _anchor?: number;
+  /** Internal: whether the current anchor message is a photo (preview w/ image),
+   * so we know to edit its caption vs its text. */
+  _anchorPhoto?: boolean;
 }
 
 export type WizardStep =

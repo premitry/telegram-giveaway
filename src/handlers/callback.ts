@@ -101,6 +101,60 @@ async function handleJoinOrCheck(env: Env, cq: CallbackQuery, giveawayId: number
   }
 }
 
+/**
+ * JOIN tapped from the CHANNEL post. A user only ends up in the `users` table
+ * after they've /start-ed the bot (start.ts + the in-DM join both upsert only
+ * from a private chat), so its presence is a reliable "bot can DM them" signal.
+ *  - New user  → answerCallback with a url deep-link: their client opens the bot
+ *    (/start g_<id>) so it can DM them. This is the ONLY time they get bounced.
+ *  - Known user → process the join right here and just show a popup + DM; they
+ *    stay in the channel, no redirect.
+ */
+async function handleChannelJoin(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
+  const known = await getUserByTelegramId(env.DB, String(cq.from.id));
+  if (!known) {
+    const botUsername = await getBotUsername(env);
+    await answerCallback(env, cq.id, undefined, false, `https://t.me/${botUsername}?start=g_${giveawayId}`);
+    return;
+  }
+
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await answerCallback(env, cq.id, 'Giveaway tidak ditemukan.', true);
+    return;
+  }
+  const result = await joinGiveaway(env, giveaway, cq.from);
+  switch (result.status) {
+    case 'inactive':
+      await answerCallback(env, cq.id, '⚠️ Giveaway ini sudah berakhir atau belum aktif.', true);
+      return;
+    case 'not_member':
+      await answerCallback(env, cq.id, '❌ Kamu belum join channel syaratnya. Join dulu ya.', true);
+      await sendMessage(env, cq.from.id, '❌ Kamu belum memenuhi syarat giveaway.', {
+        reply_markup: notEligibleKeyboard(giveaway.id, channelUrl(giveaway)),
+      });
+      return;
+    case 'already': {
+      await answerCallback(env, cq.id, '✅ Kamu sudah terdaftar di giveaway ini.', true);
+      const summary = await entriesSummary(env.DB, giveaway.id, result.participant);
+      await sendMessage(env, cq.from.id, participatingText(summary.totalEntries, summary.validReferrals), {
+        reply_markup: participatingKeyboard(giveaway.id),
+      });
+      return;
+    }
+    case 'joined': {
+      await answerCallback(env, cq.id, '🎉 Berhasil ikut giveaway! Cek chat bot ya.', true);
+      const summary = await entriesSummary(env.DB, giveaway.id, result.participant);
+      await sendMessage(env, cq.from.id, participatingText(summary.totalEntries, summary.validReferrals), {
+        reply_markup: participatingKeyboard(giveaway.id),
+      });
+      const count = await countParticipants(env.DB, giveaway.id);
+      await updatePublishedCard(env, giveaway, count);
+      return;
+    }
+  }
+}
+
 async function handleInvite(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
   const giveaway = await getGiveaway(env.DB, giveawayId);
   if (!giveaway) {
@@ -334,6 +388,9 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
     case 'join':
     case 'check':
       await handleJoinOrCheck(env, cq, giveawayId);
+      return;
+    case 'cjoin':
+      await handleChannelJoin(env, cq, giveawayId);
       return;
     case 'invite':
       await handleInvite(env, cq, giveawayId);

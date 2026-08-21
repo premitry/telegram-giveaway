@@ -1,6 +1,6 @@
 import type { Env, GiveawayRow, WizardData } from '../types';
-import { telegram, getBotUsername } from '../telegram/api';
-import { joinKeyboard, joinDeepLinkKeyboard } from '../telegram/keyboards';
+import { telegram } from '../telegram/api';
+import { joinKeyboard, channelJoinKeyboard } from '../telegram/keyboards';
 import { formatWib } from '../utils/datetime';
 import { escapeHtml } from '../utils/formatting';
 import { channelUrl } from './membership';
@@ -86,10 +86,9 @@ export async function publishGiveaway(
     return null;
   }
   const caption = renderCaption(giveaway, participantCount);
-  // Channel post: JOIN is a deep-link into the bot so the user is guaranteed to
-  // /start it first (otherwise the bot can't DM confirmations/winner notices).
-  const botUsername = await getBotUsername(env);
-  const keyboard = joinDeepLinkKeyboard(botUsername, giveaway.id);
+  // Channel post: JOIN is a callback so the bot can decide per-user whether to
+  // just notify (registered users) or bounce into the bot (new users).
+  const keyboard = channelJoinKeyboard(giveaway.id);
 
   let res;
   if (giveaway.image_file_id) {
@@ -170,8 +169,7 @@ export async function updatePublishedCard(
   const caption = renderCaption(giveaway, participantCount, winnersHtml);
   let reply_markup: InlineKeyboardMarkup = { inline_keyboard: [] };
   if (keepJoinButton) {
-    const botUsername = await getBotUsername(env);
-    reply_markup = joinDeepLinkKeyboard(botUsername, giveaway.id);
+    reply_markup = channelJoinKeyboard(giveaway.id);
   }
   const base = {
     chat_id: giveaway.publish_chat_id,

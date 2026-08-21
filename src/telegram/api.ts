@@ -60,10 +60,11 @@ export function answerCallback(
   callbackQueryId: string,
   text?: string,
   showAlert = false,
+  url?: string,
 ): Promise<TelegramResponse<boolean>> {
   return telegram<boolean>(
     'answerCallbackQuery',
-    { callback_query_id: callbackQueryId, text, show_alert: showAlert },
+    { callback_query_id: callbackQueryId, text, show_alert: showAlert, url },
     env,
   );
 }
