@@ -37,6 +37,19 @@ export async function countParticipants(db: D1Database, giveawayId: number): Pro
   return row?.c ?? 0;
 }
 
+/** Valid participant counts for every giveaway, keyed by giveaway_id (one query). */
+export async function countParticipantsAll(db: D1Database): Promise<Record<number, number>> {
+  const res = await db
+    .prepare(
+      `SELECT giveaway_id AS gid, COUNT(*) AS c
+         FROM participants WHERE is_valid = 1 GROUP BY giveaway_id`,
+    )
+    .all<{ gid: number; c: number }>();
+  const map: Record<number, number> = {};
+  for (const r of res.results ?? []) map[r.gid] = r.c;
+  return map;
+}
+
 export async function totalEntries(db: D1Database, giveawayId: number): Promise<number> {
   const row = await db
     .prepare(

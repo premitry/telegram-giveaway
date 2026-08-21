@@ -35,3 +35,9 @@ export function getUserByTelegramId(db: D1Database, telegramId: string): Promise
 export function getUserById(db: D1Database, id: number): Promise<UserRow | null> {
   return db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<UserRow>();
 }
+
+/** Total users who have started the bot (one row per unique telegram_id). */
+export async function countUsers(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT COUNT(*) AS c FROM users`).first<{ c: number }>();
+  return row?.c ?? 0;
+}

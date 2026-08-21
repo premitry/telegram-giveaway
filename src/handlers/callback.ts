@@ -2,11 +2,12 @@ import type { Env, GiveawayRow, ParticipantRow } from '../types';
 import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
 import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '../db/giveaways';
-import { getUserByTelegramId } from '../db/users';
-import { countParticipants } from '../db/participants';
+import { getUserByTelegramId, countUsers } from '../db/users';
+import { countParticipants, countParticipantsAll } from '../db/participants';
 import { joinGiveaway } from '../services/participant';
 import { updatePublishedCard, renderCaption, parsePrizes } from '../services/giveaway';
 import { channelUrl } from '../services/membership';
+import { escapeHtml } from '../utils/formatting';
 import {
   notEligibleKeyboard,
   startMenuKeyboard,
@@ -24,6 +25,14 @@ import { executeDraw, executeReroll } from './adminDraw';
 import { listWinners, renderWinnersCardBlock } from '../services/draw';
 import { isAdmin } from './auth';
 import { WELCOME } from './start';
+
+/** Status icons for the stats/list views (mirrors keyboards.ts). */
+const STATUS_ICON: Record<string, string> = {
+  active: '🟢',
+  awaiting_draw: '⏳',
+  ended: '🔒',
+  draft: '📝',
+};
 
 const HOWTO = [
   '❓ <b>Cara Ikut Giveaway</b>',
@@ -445,21 +454,28 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       return;
     case 'stats': {
       if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
-      const g = await getLatestGiveaway(env.DB);
-      if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
       await answerCallback(env, cq.id);
-      const participants = await countParticipants(env.DB, g.id);
-      await show(
-        [
-          `📊 <b>Statistik</b> — #${g.id}`,
-          `<i>${g.title}</i>`,
-          '',
-          `👥 Peserta: <b>${participants}</b>`,
-          `🏆 Pemenang: <b>${g.winners_count}</b>`,
-          `⏳ Status: <b>${g.status}</b>`,
-        ].join('\n'),
-        backKeyboard(),
-      );
+      const totalUsers = await countUsers(env.DB);
+      const list = await listGiveaways(env.DB);
+      const counts = await countParticipantsAll(env.DB);
+      const lines = [
+        '📊 <b>Statistik Bot</b>',
+        '',
+        `👥 Total user (pernah /start): <b>${totalUsers}</b>`,
+        `🎁 Total giveaway: <b>${list.length}</b>`,
+        '',
+        '<b>Daftar giveaway:</b>',
+      ];
+      if (list.length === 0) {
+        lines.push('<i>(belum ada giveaway)</i>');
+      } else {
+        for (const g of list) {
+          const icon = STATUS_ICON[g.status] ?? '•';
+          const title = g.title.length > 28 ? g.title.slice(0, 27) + '…' : g.title;
+          lines.push(`${icon} #${g.id} <b>${escapeHtml(title)}</b> — 👥 ${counts[g.id] ?? 0} • 🏆 ${g.winners_count}`);
+        }
+      }
+      await show(lines.join('\n'), backKeyboard());
       return;
     }
     default:
