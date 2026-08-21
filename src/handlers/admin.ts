@@ -116,7 +116,7 @@ async function promptStep(env: Env, chatId: number, step: WizardStep, data: Wiza
 
 async function showPreview(env: Env, chatId: number, data: WizardData): Promise<void> {
   const row = wizardToPreviewRow(data);
-  const caption = '🎉 <b>GIVEAWAY PREVIEW</b>\n\n' + renderCaption(row, 0);
+  const caption = '👁 <b>PREVIEW GIVEAWAY</b>\n\n' + renderCaption(row, 0);
   await renderAnchor(env, chatId, data, caption, previewKeyboard(), row.image_file_id ?? undefined);
 }
 // __APPEND_INPUT__
