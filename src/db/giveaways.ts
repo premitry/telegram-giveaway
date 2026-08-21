@@ -40,6 +40,15 @@ export function getLatestGiveaway(db: D1Database): Promise<GiveawayRow | null> {
     .first<GiveawayRow>();
 }
 
+/** Giveaways an admin can pick from (newest first) — used by the delete picker. */
+export async function listGiveaways(db: D1Database, limit = 25): Promise<GiveawayRow[]> {
+  const res = await db
+    .prepare(`SELECT * FROM giveaways ORDER BY id DESC LIMIT ?`)
+    .bind(limit)
+    .all<GiveawayRow>();
+  return res.results ?? [];
+}
+
 export async function setGiveawayStatus(
   db: D1Database,
   id: number,

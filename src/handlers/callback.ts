@@ -1,7 +1,7 @@
 import type { Env, GiveawayRow, ParticipantRow } from '../types';
 import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
-import { getGiveaway, getLatestGiveaway, deleteGiveaway } from '../db/giveaways';
+import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '../db/giveaways';
 import { getUserByTelegramId } from '../db/users';
 import { getParticipant, countParticipants, totalEntries } from '../db/participants';
 import {
@@ -19,6 +19,8 @@ import {
   backKeyboard,
   activeMenuKeyboard,
   entriesMenuKeyboard,
+  deleteListKeyboard,
+  deletePickConfirmKeyboard,
 } from '../telegram/keyboards';
 import { handleWizardCallback, startWizard } from './admin';
 import { isAdmin } from './auth';
@@ -150,10 +152,12 @@ async function handleDelete(
   confirm: boolean,
 ): Promise<void> {
   const msg = cq.message;
-  const editSelf = (text: string): Promise<unknown> =>
-    msg
-      ? editMessageText(env, cq.from.id, msg.message_id, text)
-      : sendMessage(env, cq.from.id, text);
+  const editSelf = (text: string, keyboard?: InlineKeyboardMarkup): Promise<unknown> => {
+    const extra = keyboard ? { reply_markup: keyboard } : {};
+    return msg
+      ? editMessageText(env, cq.from.id, msg.message_id, text, extra)
+      : sendMessage(env, cq.from.id, text, extra);
+  };
 
   if (!(await isAdmin(env, cq.from.id))) {
     await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
@@ -161,14 +165,14 @@ async function handleDelete(
   }
   if (!confirm) {
     await answerCallback(env, cq.id, 'Dibatalkan.');
-    await editSelf('↩️ Penghapusan dibatalkan. Giveaway tetap ada.');
+    await editSelf('↩️ Penghapusan dibatalkan. Giveaway tetap ada.', backKeyboard());
     return;
   }
 
   const g = await getGiveaway(env.DB, giveawayId);
   if (!g) {
     await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
-    await editSelf('ℹ️ Giveaway sudah tidak ada.');
+    await editSelf('ℹ️ Giveaway sudah tidak ada.', backKeyboard());
     return;
   }
 
@@ -180,7 +184,38 @@ async function handleDelete(
   await deleteGiveaway(env.DB, giveawayId);
 
   await answerCallback(env, cq.id, '🗑 Terhapus.');
-  await editSelf(`🗑 Giveaway #${giveawayId} <b>dihapus permanen</b> beserta data pesertanya.`);
+  await editSelf(`🗑 Giveaway #${giveawayId} <b>dihapus permanen</b> beserta data pesertanya.`, backKeyboard());
+}
+
+/** Show the confirm view for a giveaway picked from the delete list (in place). */
+async function handleDeletePick(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  const g = await getGiveaway(env.DB, giveawayId);
+  if (!g) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return;
+  }
+  await answerCallback(env, cq.id);
+  const count = await countParticipants(env.DB, g.id);
+  const text = [
+    `⚠️ <b>Hapus giveaway #${g.id}?</b>`,
+    `<i>${g.title}</i>`,
+    '',
+    `Status: <b>${g.status}</b> • Peserta: <b>${count}</b>`,
+    '',
+    '🚨 Permanen — giveaway, data peserta & referral terhapus, dan postingan channel dihapus.',
+  ].join('\n');
+  const msg = cq.message;
+  if (msg) {
+    await editMessageText(env, cq.from.id, msg.message_id, text, {
+      reply_markup: deletePickConfirmKeyboard(g.id),
+    });
+  } else {
+    await sendMessage(env, cq.from.id, text, { reply_markup: deletePickConfirmKeyboard(g.id) });
+  }
 }
 
 /** Handle the /start main-menu buttons — navigates in place (edits the same message). */
@@ -210,7 +245,18 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       }
       await answerCallback(env, cq.id);
       const count = await countParticipants(env.DB, g.id);
-      await show(renderCaption(g, count), activeMenuKeyboard(g.id));
+      await show(renderCaption(g, count), activeMenuKeyboard(g.id, await isAdmin(env, cq.from.id)));
+      return;
+    }
+    case 'dellist': {
+      if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      const list = await listGiveaways(env.DB);
+      if (list.length === 0) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
+      await answerCallback(env, cq.id);
+      await show(
+        '🗑 <b>Hapus Giveaway</b>\n\nPilih giveaway yang mau dihapus (permanen):',
+        deleteListKeyboard(list),
+      );
       return;
     }
     case 'entries': {
@@ -294,6 +340,9 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
       return;
     case 'entries':
       await handleEntries(env, cq, giveawayId);
+      return;
+    case 'delpick':
+      await handleDeletePick(env, cq, giveawayId);
       return;
     case 'delcfm':
       await handleDelete(env, cq, giveawayId, true);

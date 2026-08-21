@@ -1,5 +1,40 @@
 import type { InlineKeyboardButton, InlineKeyboardMarkup } from './types';
 
+/** Minimal shape needed to label a giveaway in the delete picker. */
+interface GiveawayPick {
+  id: number;
+  title: string;
+  status: string;
+}
+
+const STATUS_ICON: Record<string, string> = {
+  active: '🟢',
+  awaiting_draw: '⏳',
+  ended: '🔒',
+  draft: '📝',
+};
+
+/** Picker list: one button per giveaway → confirm delete (delpick:<id>). */
+export function deleteListKeyboard(giveaways: GiveawayPick[]): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = giveaways.map((g) => {
+    const icon = STATUS_ICON[g.status] ?? '•';
+    const title = g.title.length > 30 ? g.title.slice(0, 29) + '…' : g.title;
+    return [{ text: `${icon} #${g.id} ${title}`, callback_data: `delpick:${g.id}` }];
+  });
+  rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
+  return { inline_keyboard: rows };
+}
+
+/** Confirm buttons for deleting a specific picked giveaway (back → list). */
+export function deletePickConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🗑 Ya, hapus', callback_data: `delcfm:${giveawayId}` }],
+      [{ text: '⬅️ Kembali ke daftar', callback_data: 'menu:dellist' }],
+    ],
+  };
+}
+
 /** Confirm/cancel buttons for the destructive /delete command. */
 export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return {
@@ -24,6 +59,7 @@ export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
       { text: '➕ Buat Giveaway', callback_data: 'menu:new' },
       { text: '📊 Statistik', callback_data: 'menu:stats' },
     ]);
+    rows.push([{ text: '🗑 Hapus Giveaway', callback_data: 'menu:dellist' }]);
   }
   return { inline_keyboard: rows };
 }
@@ -33,14 +69,14 @@ export function backKeyboard(): InlineKeyboardMarkup {
   return { inline_keyboard: [[{ text: '⬅️ Kembali', callback_data: 'menu:home' }]] };
 }
 
-/** In-menu giveaway view: JOIN + back. */
-export function activeMenuKeyboard(giveawayId: number): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }],
-      [{ text: '⬅️ Kembali', callback_data: 'menu:home' }],
-    ],
-  };
+/** In-menu giveaway view: JOIN + back (+ admin delete for the shown one). */
+export function activeMenuKeyboard(giveawayId: number, admin = false): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = [
+    [{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }],
+  ];
+  if (admin) rows.push([{ text: '🗑 Hapus Giveaway Ini', callback_data: `delpick:${giveawayId}` }]);
+  rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
+  return { inline_keyboard: rows };
 }
 
 /** In-menu entries view: invite friends + back. */
