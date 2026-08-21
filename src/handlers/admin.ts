@@ -22,23 +22,21 @@ const ORDER: WizardStep[] = [
   'winners_count',
   'required_channel',
   'deadline',
-  'max_referral_bonus',
   'image',
   'publish_dest',
 ];
 
 const PROMPTS: Record<WizardStep, string> = {
-  title: '📝 <b>1/9</b> Kirim <b>JUDUL</b> giveaway:',
-  description: '📝 <b>2/9</b> Kirim <b>DESKRIPSI</b> (atau ketik <code>-</code> untuk kosong):',
-  prize: '🎁 <b>3/9</b> Kirim <b>PRIZE</b> (hadiah):',
-  winners_count: '🏆 <b>4/9</b> Berapa jumlah <b>WINNERS</b>? (angka)',
-  required_channel: '📢 <b>5/9</b> <b>REQUIRED CHANNEL</b> (contoh: <code>@namachannel</code>):',
+  title: '📝 <b>1/8</b> Kirim <b>JUDUL</b> giveaway:',
+  description: '📝 <b>2/8</b> Kirim <b>DESKRIPSI</b> (atau ketik <code>-</code> untuk kosong):',
+  prize: '🎁 <b>3/8</b> Kirim <b>PRIZE</b> (hadiah):',
+  winners_count: '🏆 <b>4/8</b> Berapa jumlah <b>WINNERS</b>? (angka)',
+  required_channel: '📢 <b>5/8</b> <b>REQUIRED CHANNEL</b> (contoh: <code>@namachannel</code>):',
   deadline:
-    '📅 <b>6/9</b> <b>DEADLINE</b> WIB, format <code>YYYY-MM-DD HH:MM</code>\nContoh: <code>2026-08-17 20:00</code>',
-  max_referral_bonus: '🎟 <b>7/9</b> <b>MAX REFERRAL BONUS</b> (angka, default 5):',
-  image: '🖼 <b>8/9</b> Kirim <b>GAMBAR/banner</b> (atau ketik <code>-</code> untuk tanpa gambar):',
+    '📅 <b>6/8</b> <b>DEADLINE</b> WIB, format <code>YYYY-MM-DD HH:MM</code>\nContoh: <code>2026-08-17 20:00</code>',
+  image: '🖼 <b>7/8</b> Kirim <b>GAMBAR/banner</b> (atau ketik <code>-</code> untuk tanpa gambar):',
   publish_dest:
-    '🚀 <b>9/9</b> Publish ke mana? Kirim <code>@channel</code> / chat id, atau <code>here</code> untuk chat ini:',
+    '🚀 <b>8/8</b> Publish ke mana? Kirim <code>@channel</code> / chat id, atau <code>here</code> untuk chat ini:',
   preview: '',
 };
 
@@ -166,12 +164,7 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
       const iso = parseWibToUtc(text);
       if (!iso) { await reject('❌ Format salah. Pakai <code>YYYY-MM-DD HH:MM</code>:'); return true; }
       if (isPast(iso)) { await reject('❌ Deadline sudah lewat. Masukkan waktu mendatang:'); return true; }
-      data.deadline = iso; await commit('max_referral_bonus'); return true;
-    }
-    case 'max_referral_bonus': {
-      const n = Number.parseInt(text, 10);
-      if (!Number.isInteger(n) || n < 0) { await reject('❌ Masukkan angka ≥ 0:'); return true; }
-      data.max_referral_bonus = n; await commit('image'); return true;
+      data.deadline = iso; await commit('image'); return true;
     }
     case 'image':
       if (message.photo && message.photo.length > 0) {

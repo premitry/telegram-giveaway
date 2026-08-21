@@ -93,7 +93,6 @@ export type WizardStep =
   | 'winners_count'
   | 'required_channel'
   | 'deadline'
-  | 'max_referral_bonus'
   | 'image'
   | 'publish_dest'
   | 'preview';

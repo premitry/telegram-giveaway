@@ -4,7 +4,7 @@ import { sendMessage } from '../telegram/api';
 import { upsertUser } from '../db/users';
 import { getGiveaway } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
-import { parseStartPayload, recordPendingReferral } from '../services/referral';
+import { parseStartPayload } from '../services/referral';
 import { sendGiveawayCard } from '../services/giveaway';
 import { startMenuKeyboard } from '../telegram/keyboards';
 import { isAdmin } from './auth';
@@ -15,15 +15,14 @@ export const WELCOME = [
   'Pilih menu di bawah 👇',
   '',
   '• <b>🎉 Giveaway Aktif</b> — lihat giveaway yang sedang berjalan',
-  '• <b>🎟 Entry Saya</b> — cek jumlah entry kamu',
   '• <b>❓ Cara Ikut</b> — panduan singkat',
 ].join('\n');
 
-/** Handle /start, including referral deep links (?start=g_<id>_r_<uid>). */
+/** Handle /start, including the giveaway deep link (?start=g_<id>). */
 export async function handleStart(env: Env, message: TelegramMessage): Promise<void> {
   if (!message.from) return;
   const chatId = message.chat.id;
-  const user = await upsertUser(env.DB, message.from);
+  await upsertUser(env.DB, message.from);
 
   const payload = (message.text ?? '').split(' ')[1];
   const referral = parseStartPayload(payload);
@@ -32,20 +31,11 @@ export async function handleStart(env: Env, message: TelegramMessage): Promise<v
     const giveaway = await getGiveaway(env.DB, referral.giveawayId);
     if (giveaway && giveaway.status === 'active') {
       const count = await countParticipants(env.DB, giveaway.id);
-      if (referral.referrerTelegramId) {
-        await recordPendingReferral(env.DB, giveaway, referral.referrerTelegramId, user);
-        await sendMessage(
-          env,
-          chatId,
-          '🎁 Kamu diundang teman untuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
-        );
-      } else {
-        await sendMessage(
-          env,
-          chatId,
-          '🎁 Yuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
-        );
-      }
+      await sendMessage(
+        env,
+        chatId,
+        '🎁 Yuk ikut giveaway ini! Tekan <b>JOIN GIVEAWAY</b> di bawah 👇',
+      );
       await sendGiveawayCard(env, chatId, giveaway, count);
       return;
     }

@@ -2,8 +2,7 @@ import type { Env } from '../types';
 import type { TelegramMessage } from '../telegram/types';
 import { sendMessage } from '../telegram/api';
 import { setGiveawayStatus } from '../db/giveaways';
-import { countParticipants, totalEntries } from '../db/participants';
-import { countAllValidReferrals } from '../db/referrals';
+import { countParticipants } from '../db/participants';
 import { updatePublishedCard } from '../services/giveaway';
 import {
   queueBroadcast,
@@ -24,11 +23,7 @@ export async function cmdStats(env: Env, message: TelegramMessage, args: string[
   const g = await resolveTarget(env, args);
   if (!g) { await sendMessage(env, chatId, '❌ Belum ada giveaway.'); return; }
 
-  const [participants, entries, refs] = await Promise.all([
-    countParticipants(env.DB, g.id),
-    totalEntries(env.DB, g.id),
-    countAllValidReferrals(env.DB, g.id),
-  ]);
+  const participants = await countParticipants(env.DB, g.id);
 
   await sendMessage(
     env,
@@ -37,9 +32,8 @@ export async function cmdStats(env: Env, message: TelegramMessage, args: string[
       `📊 <b>Giveaway Statistics</b> — #${g.id}`,
       `<i>${g.title}</i>`,
       '',
-      `👥 Participants: <b>${participants}</b>`,
-      `🔗 Valid Referrals: <b>${refs}</b>`,
-      `🎟 Total Entries: <b>${entries}</b>`,
+      `👥 Peserta: <b>${participants}</b>`,
+      `🏆 Pemenang: <b>${g.winners_count}</b>`,
       `⏳ Status: <b>${g.status}</b>`,
       `📅 Deadline: ${formatWib(g.deadline)}`,
     ].join('\n'),
@@ -52,12 +46,7 @@ export async function cmdParticipants(env: Env, message: TelegramMessage, args: 
   const g = await resolveTarget(env, args);
   if (!g) { await sendMessage(env, chatId, '❌ Belum ada giveaway.'); return; }
 
-  const [participants, entries, refs] = await Promise.all([
-    countParticipants(env.DB, g.id),
-    totalEntries(env.DB, g.id),
-    countAllValidReferrals(env.DB, g.id),
-  ]);
-  const avg = participants > 0 ? (entries / participants).toFixed(2) : '0';
+  const participants = await countParticipants(env.DB, g.id);
 
   await sendMessage(
     env,
@@ -65,10 +54,10 @@ export async function cmdParticipants(env: Env, message: TelegramMessage, args: 
     [
       `👥 <b>Participants</b> — giveaway #${g.id}`,
       '',
-      `• Total participants: <b>${participants}</b>`,
-      `• Total entries: <b>${entries}</b>`,
-      `• Valid referrals: <b>${refs}</b>`,
-      `• Rata-rata entry/participant: <b>${avg}</b>`,
+      `• Total peserta: <b>${participants}</b>`,
+      `• Pemenang diundi: <b>${g.winners_count}</b>`,
+      '',
+      '🎲 Pemenang dipilih acak — semua peserta peluang sama.',
     ].join('\n'),
   );
 }

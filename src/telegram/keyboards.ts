@@ -80,10 +80,7 @@ export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup 
 export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [
     [{ text: '🎉 Giveaway Aktif', callback_data: 'menu:active' }],
-    [
-      { text: '🎟 Entry Saya', callback_data: 'menu:entries' },
-      { text: '❓ Cara Ikut', callback_data: 'menu:howto' },
-    ],
+    [{ text: '❓ Cara Ikut', callback_data: 'menu:howto' }],
   ];
   if (admin) {
     rows.push([
@@ -114,16 +111,6 @@ export function activeMenuKeyboard(giveawayId: number, admin = false): InlineKey
   return { inline_keyboard: rows };
 }
 
-/** In-menu entries view: invite friends + back. */
-export function entriesMenuKeyboard(giveawayId: number): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [{ text: '👥 INVITE FRIENDS', callback_data: `invite:${giveawayId}` }],
-      [{ text: '⬅️ Kembali', callback_data: 'menu:home' }],
-    ],
-  };
-}
-
 /** JOIN button shown on the published giveaway post. */
 export function joinKeyboard(giveawayId: number): InlineKeyboardMarkup {
   return { inline_keyboard: [[{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }]] };
@@ -147,22 +134,6 @@ export function notEligibleKeyboard(giveawayId: number, channelUrl: string): Inl
       [{ text: '✅ CHECK AGAIN', callback_data: `check:${giveawayId}` }],
     ],
   };
-}
-
-/** Shown after the user successfully joins. */
-export function participatingKeyboard(giveawayId: number): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [{ text: '👥 INVITE FRIENDS', callback_data: `invite:${giveawayId}` }],
-      [{ text: '🎟 MY ENTRIES', callback_data: `entries:${giveawayId}` }],
-    ],
-  };
-}
-
-/** Share button that opens Telegram's native share sheet with the referral link. */
-export function inviteKeyboard(referralLink: string): InlineKeyboardMarkup {
-  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}`;
-  return { inline_keyboard: [[{ text: '📤 SHARE INVITE LINK', url: shareUrl }]] };
 }
 
 /** Admin preview buttons. */
@@ -195,10 +166,9 @@ export function wizardFieldsKeyboard(): InlineKeyboardMarkup {
         { text: '📅 Deadline', callback_data: 'wiz:field:deadline' },
       ],
       [
-        { text: '🎟 Max Bonus', callback_data: 'wiz:field:max_referral_bonus' },
         { text: '🖼 Gambar', callback_data: 'wiz:field:image' },
+        { text: '🚀 Tujuan Publish', callback_data: 'wiz:field:publish_dest' },
       ],
-      [{ text: '🚀 Tujuan Publish', callback_data: 'wiz:field:publish_dest' }],
       [{ text: '⬅️ Kembali ke preview', callback_data: 'wiz:preview' }],
     ],
   };

@@ -3,22 +3,15 @@ import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
 import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '../db/giveaways';
 import { getUserByTelegramId } from '../db/users';
-import { getParticipant, countParticipants, totalEntries } from '../db/participants';
-import {
-  joinGiveaway,
-  entriesSummary,
-} from '../services/participant';
+import { countParticipants } from '../db/participants';
+import { joinGiveaway } from '../services/participant';
 import { updatePublishedCard, renderCaption } from '../services/giveaway';
 import { channelUrl } from '../services/membership';
-import { buildReferralLink } from '../services/referral';
 import {
   notEligibleKeyboard,
-  participatingKeyboard,
-  inviteKeyboard,
   startMenuKeyboard,
   backKeyboard,
   activeMenuKeyboard,
-  entriesMenuKeyboard,
   deleteListKeyboard,
   deletePickConfirmKeyboard,
   drawListKeyboard,
@@ -36,40 +29,37 @@ const HOWTO = [
   '',
   '1️⃣ Tekan <b>🎉 Giveaway Aktif</b> lalu <b>JOIN GIVEAWAY</b>.',
   '2️⃣ Kalau diminta, <b>join channel</b> dulu lalu tekan <b>CHECK AGAIN</b>.',
-  '3️⃣ Setelah masuk, tekan <b>👥 INVITE FRIENDS</b> untuk dapat link referral.',
+  '3️⃣ Sudah! Tinggal tunggu pengumuman pemenang.',
   '',
-  '🎟 Tiap teman valid = <b>+1 entry</b> (menambah peluang menang).',
+  '🎲 Pemenang dipilih <b>acak</b> — semua peserta punya peluang sama.',
 ].join('\n');
 
-function participatingText(entries: number, validReferrals: number): string {
-  return [
-    "✅ <b>You're participating!</b>",
-    '',
-    `🎟 Your Entries: <b>${entries}</b>`,
-    `👥 Valid Referrals: <b>${validReferrals}</b>`,
-  ].join('\n');
-}
+/** "You're in" confirmation shown after a successful (or repeat) join. */
+const PARTICIPATING_TEXT = [
+  "✅ <b>Kamu sudah ikut giveaway ini!</b>",
+  '',
+  '🎲 Pemenang dipilih acak saat deadline — semua peserta peluang sama.',
+  'Kalau menang, kamu bakal dapat notif di sini. Good luck! 🍀',
+].join('\n');
 
 /**
- * Show the "you're participating" view. When the button was pressed inside a
- * private chat menu, edit that message in place (clean navigation, with back);
- * otherwise (e.g. from the public channel post) send a fresh DM.
+ * Show the "you're participating" confirmation. When pressed inside a private
+ * chat menu, edit that message in place (with a back button); otherwise send a
+ * fresh DM.
  */
 async function showParticipating(
   env: Env,
   cq: CallbackQuery,
-  giveaway: GiveawayRow,
-  participant: ParticipantRow,
+  _giveaway: GiveawayRow,
+  _participant: ParticipantRow,
 ): Promise<void> {
-  const summary = await entriesSummary(env.DB, giveaway.id, participant);
-  const text = participatingText(summary.totalEntries, summary.validReferrals);
   const msg = cq.message;
   if (msg && msg.chat.type === 'private') {
-    await editMessageText(env, msg.chat.id, msg.message_id, text, {
-      reply_markup: entriesMenuKeyboard(giveaway.id),
+    await editMessageText(env, msg.chat.id, msg.message_id, PARTICIPATING_TEXT, {
+      reply_markup: backKeyboard(),
     });
   } else {
-    await sendMessage(env, cq.from.id, text, { reply_markup: participatingKeyboard(giveaway.id) });
+    await sendMessage(env, cq.from.id, PARTICIPATING_TEXT);
   }
 }
 
@@ -141,66 +131,17 @@ async function handleChannelJoin(env: Env, cq: CallbackQuery, giveawayId: number
       return;
     case 'already': {
       await answerCallback(env, cq.id, '✅ Kamu sudah terdaftar di giveaway ini.', true);
-      const summary = await entriesSummary(env.DB, giveaway.id, result.participant);
-      await sendMessage(env, cq.from.id, participatingText(summary.totalEntries, summary.validReferrals), {
-        reply_markup: participatingKeyboard(giveaway.id),
-      });
+      await sendMessage(env, cq.from.id, PARTICIPATING_TEXT);
       return;
     }
     case 'joined': {
       await answerCallback(env, cq.id, '🎉 Berhasil ikut giveaway! Cek chat bot ya.', true);
-      const summary = await entriesSummary(env.DB, giveaway.id, result.participant);
-      await sendMessage(env, cq.from.id, participatingText(summary.totalEntries, summary.validReferrals), {
-        reply_markup: participatingKeyboard(giveaway.id),
-      });
+      await sendMessage(env, cq.from.id, PARTICIPATING_TEXT);
       const count = await countParticipants(env.DB, giveaway.id);
       await updatePublishedCard(env, giveaway, count);
       return;
     }
   }
-}
-
-async function handleInvite(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
-  const giveaway = await getGiveaway(env.DB, giveawayId);
-  if (!giveaway) {
-    await answerCallback(env, cq.id, 'Giveaway tidak ditemukan.', true);
-    return;
-  }
-  const botUsername = await getBotUsername(env);
-  const link = buildReferralLink(botUsername, giveaway.id, String(cq.from.id));
-  await answerCallback(env, cq.id);
-  await sendMessage(
-    env,
-    cq.from.id,
-    [
-      '👥 <b>Undang teman & dapatkan entry tambahan!</b>',
-      '',
-      `Setiap teman yang valid = <b>+1 entry</b> (maksimal ${giveaway.max_referral_bonus}).`,
-      '',
-      'Link referral kamu:',
-      `<code>${link}</code>`,
-    ].join('\n'),
-    { reply_markup: inviteKeyboard(link) },
-  );
-}
-
-async function handleEntries(env: Env, cq: CallbackQuery, giveawayId: number): Promise<void> {
-  const giveaway = await getGiveaway(env.DB, giveawayId);
-  if (!giveaway) {
-    await answerCallback(env, cq.id, 'Giveaway tidak ditemukan.', true);
-    return;
-  }
-  const user = await getUserByTelegramId(env.DB, String(cq.from.id));
-  const participant = user ? await getParticipant(env.DB, giveaway.id, user.id) : null;
-  if (!participant) {
-    await answerCallback(env, cq.id, 'Kamu belum ikut giveaway ini.', true);
-    return;
-  }
-  await answerCallback(env, cq.id);
-  const summary = await entriesSummary(env.DB, giveaway.id, participant);
-  await sendMessage(env, cq.from.id, participatingText(summary.totalEntries, summary.validReferrals), {
-    reply_markup: participatingKeyboard(giveaway.id),
-  });
 }
 
 /** Confirm/cancel handler for the destructive /delete flow. Admin-only. */
@@ -480,20 +421,6 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       );
       return;
     }
-    case 'entries': {
-      const g = await getLatestGiveaway(env.DB);
-      if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
-      const user = await getUserByTelegramId(env.DB, String(cq.from.id));
-      const participant = user ? await getParticipant(env.DB, g.id, user.id) : null;
-      if (!participant) {
-        await answerCallback(env, cq.id, 'Kamu belum ikut giveaway. Tekan Giveaway Aktif → JOIN dulu.', true);
-        return;
-      }
-      await answerCallback(env, cq.id);
-      const summary = await entriesSummary(env.DB, g.id, participant);
-      await show(participatingText(summary.totalEntries, summary.validReferrals), entriesMenuKeyboard(g.id));
-      return;
-    }
     case 'howto':
       await answerCallback(env, cq.id);
       await show(HOWTO, backKeyboard());
@@ -508,17 +435,14 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       const g = await getLatestGiveaway(env.DB);
       if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
       await answerCallback(env, cq.id);
-      const [participants, entries] = await Promise.all([
-        countParticipants(env.DB, g.id),
-        totalEntries(env.DB, g.id),
-      ]);
+      const participants = await countParticipants(env.DB, g.id);
       await show(
         [
           `📊 <b>Statistik</b> — #${g.id}`,
           `<i>${g.title}</i>`,
           '',
-          `👥 Participants: <b>${participants}</b>`,
-          `🎟 Total Entries: <b>${entries}</b>`,
+          `👥 Peserta: <b>${participants}</b>`,
+          `🏆 Pemenang: <b>${g.winners_count}</b>`,
           `⏳ Status: <b>${g.status}</b>`,
         ].join('\n'),
         backKeyboard(),
@@ -558,12 +482,6 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
       return;
     case 'cjoin':
       await handleChannelJoin(env, cq, giveawayId);
-      return;
-    case 'invite':
-      await handleInvite(env, cq, giveawayId);
-      return;
-    case 'entries':
-      await handleEntries(env, cq, giveawayId);
       return;
     case 'delpick':
       await handleDeletePick(env, cq, giveawayId);
