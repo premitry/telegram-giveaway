@@ -76,19 +76,23 @@ export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup 
   };
 }
 
-/** Main menu shown on /start (buttons vary for admins). */
+/** Main menu shown on /start (buttons vary for admins). Laid out as an even 2-column grid. */
 export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [
-    [{ text: '🎉 Giveaway Aktif', callback_data: 'menu:active' }],
-    [{ text: '❓ Cara Ikut', callback_data: 'menu:howto' }],
+    [
+      { text: '🎉 Giveaway Aktif', callback_data: 'menu:active' },
+      { text: '❓ Cara Ikut', callback_data: 'menu:howto' },
+    ],
   ];
   if (admin) {
     rows.push([
       { text: '➕ Buat Giveaway', callback_data: 'menu:new' },
       { text: '📊 Statistik', callback_data: 'menu:stats' },
     ]);
-    rows.push([{ text: '🎬 Undi Pemenang', callback_data: 'menu:drawlist' }]);
-    rows.push([{ text: '🗑 Hapus Giveaway', callback_data: 'menu:dellist' }]);
+    rows.push([
+      { text: '🎬 Undi Pemenang', callback_data: 'menu:drawlist' },
+      { text: '🗑 Hapus Giveaway', callback_data: 'menu:dellist' },
+    ]);
   }
   return { inline_keyboard: rows };
 }
