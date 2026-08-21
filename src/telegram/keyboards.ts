@@ -1,5 +1,15 @@
 import type { InlineKeyboardButton, InlineKeyboardMarkup } from './types';
 
+/** Confirm/cancel buttons for the destructive /delete command. */
+export function deleteConfirmKeyboard(giveawayId: number): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🗑 Ya, hapus', callback_data: `delcfm:${giveawayId}` }],
+      [{ text: '↩️ Batal', callback_data: `delx:${giveawayId}` }],
+    ],
+  };
+}
+
 /** Main menu shown on /start (buttons vary for admins). */
 export function startMenuKeyboard(admin: boolean): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [

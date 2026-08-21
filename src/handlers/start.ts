@@ -2,7 +2,7 @@ import type { Env } from '../types';
 import type { TelegramMessage } from '../telegram/types';
 import { sendMessage } from '../telegram/api';
 import { upsertUser } from '../db/users';
-import { getGiveaway, getLatestGiveaway } from '../db/giveaways';
+import { getGiveaway } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { parseStartPayload, recordPendingReferral } from '../services/referral';
 import { sendGiveawayCard } from '../services/giveaway';
@@ -53,12 +53,9 @@ export async function handleStart(env: Env, message: TelegramMessage): Promise<v
     return;
   }
 
-  // Plain /start — show welcome menu + the latest active giveaway if any.
+  // Plain /start — show only the welcome menu. The active giveaway is viewed via
+  // the "🎉 Giveaway Aktif" button (in place), so we don't auto-send the card here
+  // (that would show it twice).
   const admin = await isAdmin(env, message.from.id);
   await sendMessage(env, chatId, WELCOME, { reply_markup: startMenuKeyboard(admin) });
-  const latest = await getLatestGiveaway(env.DB);
-  if (latest && latest.status === 'active') {
-    const count = await countParticipants(env.DB, latest.id);
-    await sendGiveawayCard(env, chatId, latest, count);
-  }
 }

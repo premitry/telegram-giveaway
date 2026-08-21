@@ -8,6 +8,7 @@ import {
   cmdStats,
   cmdParticipants,
   cmdEnd,
+  cmdDelete,
   cmdBroadcast,
   cmdAddAdmin,
   cmdDelAdmin,
@@ -32,6 +33,7 @@ const HELP_ADMIN = [
   '/draw [id] — undi pemenang',
   '/reroll &lt;pos&gt; [id] — ganti 1 pemenang',
   '/end [id] — akhiri giveaway',
+  '/delete [id] — hapus giveaway (mis. salah buat)',
   '/bc [all|id] pesan — broadcast (bisa reply pesan)',
   '/cancel — batalkan wizard',
   '',
@@ -83,6 +85,10 @@ export async function handleCommand(env: Env, message: TelegramMessage): Promise
       return;
     case '/end':
       await needAdmin(() => cmdEnd(env, message, args));
+      return;
+    case '/delete':
+    case '/hapus':
+      await needAdmin(() => cmdDelete(env, message, args));
       return;
     case '/broadcast':
     case '/bc':

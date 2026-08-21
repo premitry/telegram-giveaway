@@ -68,3 +68,17 @@ export async function getExpiredActive(db: D1Database, nowUtcIso: string): Promi
     .all<GiveawayRow>();
   return res.results ?? [];
 }
+
+/**
+ * Permanently delete a giveaway and everything tied to it (participants,
+ * referrals, winners). Used to remove a giveaway created by mistake.
+ * The published channel post is handled separately by the caller.
+ */
+export async function deleteGiveaway(db: D1Database, id: number): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM participants WHERE giveaway_id = ?`).bind(id),
+    db.prepare(`DELETE FROM referrals WHERE giveaway_id = ?`).bind(id),
+    db.prepare(`DELETE FROM winners WHERE giveaway_id = ?`).bind(id),
+    db.prepare(`DELETE FROM giveaways WHERE id = ?`).bind(id),
+  ]);
+}

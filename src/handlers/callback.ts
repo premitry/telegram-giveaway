@@ -1,7 +1,7 @@
 import type { Env, GiveawayRow, ParticipantRow } from '../types';
 import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
-import { answerCallback, sendMessage, editMessageText, getBotUsername } from '../telegram/api';
-import { getGiveaway, getLatestGiveaway } from '../db/giveaways';
+import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
+import { getGiveaway, getLatestGiveaway, deleteGiveaway } from '../db/giveaways';
 import { getUserByTelegramId } from '../db/users';
 import { getParticipant, countParticipants, totalEntries } from '../db/participants';
 import {
@@ -142,6 +142,47 @@ async function handleEntries(env: Env, cq: CallbackQuery, giveawayId: number): P
   });
 }
 
+/** Confirm/cancel handler for the destructive /delete flow. Admin-only. */
+async function handleDelete(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+  confirm: boolean,
+): Promise<void> {
+  const msg = cq.message;
+  const editSelf = (text: string): Promise<unknown> =>
+    msg
+      ? editMessageText(env, cq.from.id, msg.message_id, text)
+      : sendMessage(env, cq.from.id, text);
+
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  if (!confirm) {
+    await answerCallback(env, cq.id, 'Dibatalkan.');
+    await editSelf('↩️ Penghapusan dibatalkan. Giveaway tetap ada.');
+    return;
+  }
+
+  const g = await getGiveaway(env.DB, giveawayId);
+  if (!g) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    await editSelf('ℹ️ Giveaway sudah tidak ada.');
+    return;
+  }
+
+  // Remove the published channel post first (best-effort — deletion is limited to
+  // ~48h old messages and needs delete rights; ignore failures).
+  if (g.publish_chat_id && g.publish_message_id) {
+    await deleteMessage(env, g.publish_chat_id, Number(g.publish_message_id));
+  }
+  await deleteGiveaway(env.DB, giveawayId);
+
+  await answerCallback(env, cq.id, '🗑 Terhapus.');
+  await editSelf(`🗑 Giveaway #${giveawayId} <b>dihapus permanen</b> beserta data pesertanya.`);
+}
+
 /** Handle the /start main-menu buttons — navigates in place (edits the same message). */
 async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<void> {
   const chatId = cq.from.id;
@@ -253,6 +294,12 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
       return;
     case 'entries':
       await handleEntries(env, cq, giveawayId);
+      return;
+    case 'delcfm':
+      await handleDelete(env, cq, giveawayId, true);
+      return;
+    case 'delx':
+      await handleDelete(env, cq, giveawayId, false);
       return;
     default:
       await answerCallback(env, cq.id);

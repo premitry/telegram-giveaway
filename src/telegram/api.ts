@@ -104,6 +104,15 @@ export function editMessageText(
   );
 }
 
+/** Delete a message (best-effort; used to remove a published giveaway post). */
+export function deleteMessage(
+  env: Env,
+  chatId: string | number,
+  messageId: number,
+): Promise<TelegramResponse<boolean>> {
+  return telegram<boolean>('deleteMessage', { chat_id: chatId, message_id: messageId }, env);
+}
+
 // Module-level cache for the bot username within an isolate.
 let cachedUsername: string | null = null;
 

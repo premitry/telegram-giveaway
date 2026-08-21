@@ -12,6 +12,7 @@ import {
   allUserChatIds,
 } from '../services/broadcast';
 import { addAdmin, removeAdmin, listAdmins } from '../db/admins';
+import { deleteConfirmKeyboard } from '../telegram/keyboards';
 import { isOwner } from './auth';
 import { entitiesToHtml, escapeHtml } from '../utils/formatting';
 import { resolveTarget } from './adminDraw';
@@ -83,6 +84,33 @@ export async function cmdEnd(env: Env, message: TelegramMessage, args: string[])
   const count = await countParticipants(env.DB, g.id);
   await updatePublishedCard(env, { ...g, status: 'ended' }, count, false);
   await sendMessage(env, chatId, `🔒 Giveaway #${g.id} sekarang <b>ENDED</b>. Tombol JOIN dinonaktifkan.`);
+}
+
+/**
+ * /delete [id] (alias /hapus) — permanently remove a giveaway created by
+ * mistake, including its participants/referrals and the published post.
+ * Destructive, so this only shows a confirmation; the actual delete runs when
+ * the admin taps the confirm button (handled in the callback router).
+ */
+export async function cmdDelete(env: Env, message: TelegramMessage, args: string[]): Promise<void> {
+  const chatId = message.chat.id;
+  const g = await resolveTarget(env, args);
+  if (!g) { await sendMessage(env, chatId, '❌ Belum ada giveaway.'); return; }
+
+  const count = await countParticipants(env.DB, g.id);
+  await sendMessage(
+    env,
+    chatId,
+    [
+      `⚠️ <b>Hapus giveaway #${g.id}?</b>`,
+      `<i>${escapeHtml(g.title)}</i>`,
+      '',
+      `Status: <b>${g.status}</b> • Peserta: <b>${count}</b>`,
+      '',
+      '🚨 Ini <b>permanen</b> — giveaway, data peserta & referral ikut terhapus, dan postingan channel dihapus. Tidak bisa dibatalkan.',
+    ].join('\n'),
+    { reply_markup: deleteConfirmKeyboard(g.id) },
+  );
 }
 
 /**
