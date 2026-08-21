@@ -4,7 +4,15 @@ import { sendMessage } from '../telegram/api';
 import { isAdmin } from './auth';
 import { handleStart } from './start';
 import { startWizard } from './admin';
-import { cmdStats, cmdParticipants, cmdEnd, cmdBroadcast } from './adminCommands';
+import {
+  cmdStats,
+  cmdParticipants,
+  cmdEnd,
+  cmdBroadcast,
+  cmdAddAdmin,
+  cmdDelAdmin,
+  cmdAdmins,
+} from './adminCommands';
 import { cmdDraw, cmdReroll } from './adminDraw';
 import { clearSession } from '../db/sessions';
 
@@ -24,8 +32,13 @@ const HELP_ADMIN = [
   '/draw [id] — undi pemenang',
   '/reroll &lt;pos&gt; [id] — ganti 1 pemenang',
   '/end [id] — akhiri giveaway',
-  '/broadcast [id] pesan — kirim ke participant',
+  '/bc [all|id] pesan — broadcast (bisa reply pesan)',
   '/cancel — batalkan wizard',
+  '',
+  '<b>Owner:</b>',
+  '/add &lt;telegram_id&gt; — tambah admin',
+  '/deladmin &lt;telegram_id&gt; — hapus admin',
+  '/admins — daftar admin',
 ].join('\n');
 
 /** Route a slash-command message. */
@@ -36,7 +49,7 @@ export async function handleCommand(env: Env, message: TelegramMessage): Promise
   const parts = raw.split(/\s+/);
   const command = parts[0].split('@')[0].toLowerCase();
   const args = parts.slice(1);
-  const admin = isAdmin(env, message.from.id);
+  const admin = await isAdmin(env, message.from.id);
 
   const needAdmin = async (fn: () => Promise<void>): Promise<void> => {
     if (!admin) {
@@ -72,7 +85,17 @@ export async function handleCommand(env: Env, message: TelegramMessage): Promise
       await needAdmin(() => cmdEnd(env, message, args));
       return;
     case '/broadcast':
+    case '/bc':
       await needAdmin(() => cmdBroadcast(env, message, args));
+      return;
+    case '/add':
+      await needAdmin(() => cmdAddAdmin(env, message, args));
+      return;
+    case '/deladmin':
+      await needAdmin(() => cmdDelAdmin(env, message, args));
+      return;
+    case '/admins':
+      await needAdmin(() => cmdAdmins(env, message));
       return;
     case '/cancel':
       await clearSession(env.DB, String(message.from.id));

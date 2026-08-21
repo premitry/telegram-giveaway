@@ -159,7 +159,7 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
   switch (action) {
     case 'home':
       await answerCallback(env, cq.id);
-      await show(WELCOME, startMenuKeyboard(isAdmin(env, cq.from.id)));
+      await show(WELCOME, startMenuKeyboard(await isAdmin(env, cq.from.id)));
       return;
     case 'active': {
       const g = await getLatestGiveaway(env.DB);
@@ -191,12 +191,12 @@ async function handleMenu(env: Env, cq: CallbackQuery, action: string): Promise<
       await show(HOWTO, backKeyboard());
       return;
     case 'new':
-      if (!isAdmin(env, cq.from.id)) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
       await answerCallback(env, cq.id);
       await startWizard(env, chatId, String(cq.from.id));
       return;
     case 'stats': {
-      if (!isAdmin(env, cq.from.id)) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
+      if (!(await isAdmin(env, cq.from.id))) { await answerCallback(env, cq.id, '🚫 Khusus admin.', true); return; }
       const g = await getLatestGiveaway(env.DB);
       if (!g) { await answerCallback(env, cq.id, 'Belum ada giveaway.', true); return; }
       await answerCallback(env, cq.id);

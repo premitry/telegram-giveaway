@@ -54,6 +54,7 @@ export interface TelegramMessage {
   photo?: PhotoSize[];
   entities?: MessageEntity[];
   caption_entities?: MessageEntity[];
+  reply_to_message?: TelegramMessage;
 }
 
 export interface CallbackQuery {

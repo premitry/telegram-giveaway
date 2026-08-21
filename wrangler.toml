@@ -23,25 +23,10 @@ database_id = "9c1d1fbe-de8e-4843-94b9-f8aeb2d37660"
 migrations_dir = "migrations"
 
 # ---------------------------------------------------------------------------
-# Cloudflare Queues (requires a paid Workers plan).
-# The deploy account is currently on the FREE plan, so these are commented out
-# and /broadcast is disabled. Un-comment both blocks after upgrading to Paid
-# and run: wrangler queues create giveaway-broadcast && wrangler queues create giveaway-broadcast-dlq
-# ---------------------------------------------------------------------------
-# [[queues.producers]]
-# binding = "BROADCAST_QUEUE"
-# queue = "giveaway-broadcast"
-
-# [[queues.consumers]]
-# queue = "giveaway-broadcast"
-# max_batch_size = 10
-# max_batch_timeout = 5
-# max_retries = 3
-# dead_letter_queue = "giveaway-broadcast-dlq"
-
-# ---------------------------------------------------------------------------
-# Cron Trigger: every 5 minutes flips expired active giveaways to awaiting_draw
-# (and auto-draws when auto_draw = 1).
+# Cron Trigger: every 5 minutes. Flips expired active giveaways to awaiting_draw
+# (and auto-draws when auto_draw = 1), and drains one batch of the broadcast
+# queue (broadcast_queue table) so /bc works on the FREE plan — no Cloudflare
+# Queues / paid plan required.
 # ---------------------------------------------------------------------------
 [triggers]
 crons = ["*/5 * * * *"]

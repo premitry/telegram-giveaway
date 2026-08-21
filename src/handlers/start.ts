@@ -54,7 +54,7 @@ export async function handleStart(env: Env, message: TelegramMessage): Promise<v
   }
 
   // Plain /start — show welcome menu + the latest active giveaway if any.
-  const admin = isAdmin(env, message.from.id);
+  const admin = await isAdmin(env, message.from.id);
   await sendMessage(env, chatId, WELCOME, { reply_markup: startMenuKeyboard(admin) });
   const latest = await getLatestGiveaway(env.DB);
   if (latest && latest.status === 'active') {

@@ -1,10 +1,8 @@
 import type { Env } from './types';
 import type { TelegramUpdate } from './telegram/types';
-import type { BroadcastMessage } from './services/broadcast';
 import { handleCommand } from './handlers/commands';
 import { handleCallback } from './handlers/callback';
 import { handleWizardInput } from './handlers/admin';
-import { handleBroadcastBatch } from './services/broadcast';
 import { runCron } from './services/cron';
 
 /** Dispatch a single Telegram update. */
@@ -64,8 +62,4 @@ export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runCron(env).catch((err) => console.error('cron error', err)));
   },
-
-  async queue(batch: MessageBatch<BroadcastMessage>, env: Env): Promise<void> {
-    await handleBroadcastBatch(batch, env);
-  },
-} satisfies ExportedHandler<Env, BroadcastMessage>;
+} satisfies ExportedHandler<Env>;
