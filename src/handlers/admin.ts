@@ -1,6 +1,6 @@
 import type { Env, WizardData, WizardStep } from '../types';
 import type { CallbackQuery, TelegramMessage } from '../telegram/types';
-import { answerCallback, sendMessage, telegram } from '../telegram/api';
+import { answerCallback, sendMessage, telegram, deleteMessage } from '../telegram/api';
 import { getSession, setSession, clearSession } from '../db/sessions';
 import { createGiveaway, getGiveaway, setPublishInfo } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
@@ -43,29 +43,62 @@ const PROMPTS: Record<WizardStep, string> = {
 };
 
 export async function startWizard(env: Env, chatId: number, tgId: string): Promise<void> {
-  await setSession(env.DB, tgId, 'title', {});
-  await sendMessage(env, chatId, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title, {
+  const data: WizardData = {};
+  await sendTracked(env, chatId, data, '🎬 <b>Buat Giveaway Baru</b>\n\n' + PROMPTS.title, {
     reply_markup: wizardStepKeyboard(false),
   });
+  await setSession(env.DB, tgId, 'title', data);
+}
+
+/** Record a message id (in the admin's private chat) for later cleanup. */
+function track(data: WizardData, id?: number): void {
+  if (id) (data._msgs ??= []).push(id);
+}
+
+/** Send a text message and remember its id so the wizard can clean it up later. */
+async function sendTracked(
+  env: Env,
+  chatId: number,
+  data: WizardData,
+  text: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  const res = await sendMessage(env, chatId, text, extra);
+  if (res.ok && res.result) track(data, res.result.message_id);
+}
+
+/**
+ * Delete every message tracked during the wizard (best-effort), plus any extra
+ * ids passed in (e.g. the preview message carrying the Publish button).
+ */
+async function cleanupWizard(
+  env: Env,
+  chatId: number,
+  data: WizardData,
+  ...extraIds: number[]
+): Promise<void> {
+  const ids = new Set<number>([...(data._msgs ?? []), ...extraIds].filter((n) => n > 0));
+  for (const id of ids) await deleteMessage(env, chatId, id);
 }
 
 /** Send the prompt for a step, with back/cancel controls attached. */
-async function promptStep(env: Env, chatId: number, step: WizardStep): Promise<void> {
+async function promptStep(env: Env, chatId: number, step: WizardStep, data: WizardData): Promise<void> {
   const canBack = ORDER.indexOf(step) > 0;
-  await sendMessage(env, chatId, PROMPTS[step], { reply_markup: wizardStepKeyboard(canBack) });
+  await sendTracked(env, chatId, data, PROMPTS[step], { reply_markup: wizardStepKeyboard(canBack) });
 }
 
 async function showPreview(env: Env, chatId: number, data: WizardData): Promise<void> {
   const row = wizardToPreviewRow(data);
   const caption = '🎉 <b>GIVEAWAY PREVIEW</b>\n\n' + renderCaption(row, 0);
   if (row.image_file_id) {
-    await telegram(
+    const res = await telegram<TelegramMessage>(
       'sendPhoto',
       { chat_id: chatId, photo: row.image_file_id, caption, parse_mode: 'HTML', reply_markup: previewKeyboard() },
       env,
     );
+    if (res.ok && res.result) track(data, res.result.message_id);
   } else {
-    await sendMessage(env, chatId, caption, { reply_markup: previewKeyboard() });
+    await sendTracked(env, chatId, data, caption, { reply_markup: previewKeyboard() });
   }
 }
 // __APPEND_INPUT__
@@ -81,28 +114,29 @@ export async function handleWizardInput(env: Env, message: TelegramMessage): Pro
 
   const chatId = message.chat.id;
   const data = session.data;
+  // Remember the admin's own input message so it gets cleaned up at the end too.
+  track(data, message.message_id);
   const text = (message.text ?? '').trim();
   // Free-text fields preserve bold/italic/etc. via entity → HTML conversion.
   const html = (): string => entitiesToHtml(message.text ?? '', message.entities).trim();
 
   // Store the field value, then either return to preview (single-field edit)
-  // or advance to the next step.
+  // or advance to the next step. Messages are sent BEFORE persisting so their
+  // ids (tracked for cleanup) are saved with the session.
   const commit = async (nextStep: WizardStep): Promise<void> => {
-    if (data._edit) {
+    if (data._edit || nextStep === 'preview') {
       delete data._edit;
-      await setSession(env.DB, tgId, 'preview', data);
       await showPreview(env, chatId, data);
+      await setSession(env.DB, tgId, 'preview', data);
       return;
     }
-    if (nextStep === 'preview') {
-      await setSession(env.DB, tgId, 'preview', data);
-      await showPreview(env, chatId, data);
-      return;
-    }
+    await promptStep(env, chatId, nextStep, data);
     await setSession(env.DB, tgId, nextStep, data);
-    await promptStep(env, chatId, nextStep);
   };
-  const reject = (msg: string): Promise<unknown> => sendMessage(env, chatId, msg);
+  const reject = async (msg: string): Promise<void> => {
+    await sendTracked(env, chatId, data, msg);
+    await setSession(env.DB, tgId, session.step, data);
+  };
 
   switch (session.step) {
     case 'title':
@@ -171,6 +205,7 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
   const action = parts[1];
 
   if (action === 'cancel') {
+    await cleanupWizard(env, chatId, session.data, cq.message?.message_id ?? 0);
     await clearSession(env.DB, tgId);
     await answerCallback(env, cq.id, 'Dibatalkan.');
     await sendMessage(env, chatId, '❌ Pembuatan giveaway dibatalkan.');
@@ -184,17 +219,18 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
       return;
     }
     const prev = ORDER[idx - 1];
-    await setSession(env.DB, tgId, prev, session.data);
     await answerCallback(env, cq.id);
-    await promptStep(env, chatId, prev);
+    await promptStep(env, chatId, prev, session.data);
+    await setSession(env.DB, tgId, prev, session.data);
     return;
   }
   // Preview EDIT → show the field picker.
   if (action === 'edit') {
     await answerCallback(env, cq.id);
-    await sendMessage(env, chatId, '✏️ Pilih bagian yang mau diperbaiki:', {
+    await sendTracked(env, chatId, session.data, '✏️ Pilih bagian yang mau diperbaiki:', {
       reply_markup: wizardFieldsKeyboard(),
     });
+    await setSession(env.DB, tgId, session.step, session.data);
     return;
   }
   // Edit a single field → re-prompt just that field, then return to preview.
@@ -205,20 +241,20 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
       return;
     }
     const data = { ...session.data, _edit: true };
-    await setSession(env.DB, tgId, step, data);
     await answerCallback(env, cq.id);
-    await sendMessage(env, chatId, '✏️ ' + PROMPTS[step], {
+    await sendTracked(env, chatId, data, '✏️ ' + PROMPTS[step], {
       reply_markup: wizardEditFieldKeyboard(),
     });
+    await setSession(env.DB, tgId, step, data);
     return;
   }
   // Return to preview (cancel a single-field edit, or from the field picker).
   if (action === 'preview') {
     const data = { ...session.data };
     delete data._edit;
-    await setSession(env.DB, tgId, 'preview', data);
     await answerCallback(env, cq.id);
     await showPreview(env, chatId, data);
+    await setSession(env.DB, tgId, 'preview', data);
     return;
   }
   if (action === 'publish') {
@@ -243,6 +279,9 @@ export async function handleWizardCallback(env: Env, cq: CallbackQuery): Promise
       return;
     }
     await setPublishInfo(env.DB, id, published.chatId, published.messageId);
+    // Wipe the whole wizard conversation (prompts, inputs, preview) — keep only
+    // the success line below so the admin chat stays clean.
+    await cleanupWizard(env, chatId, session.data, cq.message?.message_id ?? 0);
     await clearSession(env.DB, tgId);
     await sendMessage(env, chatId, `✅ Giveaway <b>#${id}</b> aktif!\n📅 Deadline: ${formatWib(giveaway.deadline)}`);
     return;

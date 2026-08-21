@@ -78,6 +78,9 @@ export interface WizardData {
   /** Internal: set while editing a single field from the preview, so the next
    * valid input returns to the preview instead of advancing to the next step. */
   _edit?: boolean;
+  /** Internal: message ids (admin's private chat) sent/received during the
+   * wizard, deleted on publish/cancel so the chat stays clean. */
+  _msgs?: number[];
 }
 
 export type WizardStep =
