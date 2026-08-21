@@ -108,8 +108,10 @@ export function activeMenuKeyboard(giveawayId: number, admin = false): InlineKey
     [{ text: '🎉 JOIN GIVEAWAY', callback_data: `join:${giveawayId}` }],
   ];
   if (admin) {
-    rows.push([{ text: '🎬 Undi Pemenang Ini', callback_data: `drawpick:${giveawayId}` }]);
-    rows.push([{ text: '🗑 Hapus Giveaway Ini', callback_data: `delpick:${giveawayId}` }]);
+    rows.push([
+      { text: '🎬 Undi Pemenang', callback_data: `drawpick:${giveawayId}` },
+      { text: '🗑 Hapus Giveaway', callback_data: `delpick:${giveawayId}` },
+    ]);
   }
   rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:home' }]);
   return { inline_keyboard: rows };

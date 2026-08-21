@@ -38,7 +38,11 @@ const PROMPTS: Record<WizardStep, string> = {
     '📅 <b>6/8</b> <b>DEADLINE</b> WIB, format <code>YYYY-MM-DD HH:MM</code>\nContoh: <code>2026-08-17 20:00</code>',
   image: '🖼 <b>7/8</b> Kirim <b>GAMBAR/banner</b> (atau ketik <code>-</code> untuk tanpa gambar):',
   publish_dest:
-    '🚀 <b>8/8</b> Publish ke mana? Kirim <code>@channel</code> / chat id, atau <code>here</code> untuk chat ini:',
+    '🚀 <b>8/8</b> Publish giveaway ke mana?\n\n' +
+    '📢 <b>Ke channel:</b>\n' +
+    '1. Tambahkan bot ini sebagai <b>ADMIN</b> di channel-mu dulu (izin kirim & edit pesan).\n' +
+    '2. Kirim username channel, contoh: <code>@namachannel</code> (atau ID <code>-100xxxxxxxxxx</code>).\n\n' +
+    '💬 <b>Ke chat ini:</b> ketik <code>here</code>.',
   preview: '',
 };
 
