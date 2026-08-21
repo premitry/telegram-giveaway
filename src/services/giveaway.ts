@@ -30,8 +30,9 @@ export function wizardToPreviewRow(data: WizardData): GiveawayRow {
   };
 }
 
-/** Render the public giveaway card caption. */
-export function renderCaption(g: GiveawayRow, participantCount: number): string {
+/** Render the public giveaway card caption. When the giveaway has ended and a
+ * winnersHtml block is given, the winners are shown INSIDE the card. */
+export function renderCaption(g: GiveawayRow, participantCount: number, winnersHtml?: string): string {
   const lines: string[] = [];
   lines.push(`🎉 <b>${escapeHtml(g.title)}</b>`);
   lines.push('');
@@ -57,7 +58,12 @@ export function renderCaption(g: GiveawayRow, participantCount: number): string 
 
   if (g.status === 'ended') {
     lines.push('');
-    lines.push('🔒 <b>GIVEAWAY ENDED</b>');
+    if (winnersHtml && winnersHtml.trim()) {
+      lines.push('🎊 <b>PEMENANG</b>');
+      lines.push(winnersHtml);
+    } else {
+      lines.push('🔒 <b>GIVEAWAY ENDED</b>');
+    }
   } else if (g.status === 'awaiting_draw') {
     lines.push('');
     lines.push('⏳ <b>Waiting for winner draw…</b>');
@@ -158,9 +164,10 @@ export async function updatePublishedCard(
   giveaway: GiveawayRow,
   participantCount: number,
   keepJoinButton = true,
+  winnersHtml?: string,
 ): Promise<void> {
   if (!giveaway.publish_chat_id || !giveaway.publish_message_id) return;
-  const caption = renderCaption(giveaway, participantCount);
+  const caption = renderCaption(giveaway, participantCount, winnersHtml);
   let reply_markup: InlineKeyboardMarkup = { inline_keyboard: [] };
   if (keepJoinButton) {
     const botUsername = await getBotUsername(env);

@@ -101,25 +101,25 @@ export async function listWinners(env: Env, giveawayId: number): Promise<WinnerR
   return res.results ?? [];
 }
 
-/** Render a winners announcement, resolving each winner's display handle. */
-export async function renderWinnersAnnouncement(
+/**
+ * Compact winners list (HTML) to embed INSIDE the published giveaway card.
+ * Accepts any winner shape carrying a position + user_id; the handle is
+ * resolved from the users table. Returns '' when there are no winners.
+ */
+export async function renderWinnersCardBlock(
   env: Env,
-  giveaway: GiveawayRow,
-  winners: DrawnWinner[],
+  winners: { position: number; userId: number }[],
 ): Promise<string> {
-  if (winners.length === 0) {
-    return `🎉 <b>${giveaway.title}</b>\n\n😕 Tidak ada pemenang yang memenuhi syarat.`;
-  }
-  const lines = [`🎉 <b>${giveaway.title}</b>`, '', '🏆 <b>WINNERS</b>', ''];
-  for (const w of winners) {
+  if (winners.length === 0) return '';
+  const sorted = [...winners].sort((a, b) => a.position - b.position);
+  const lines: string[] = [];
+  for (const w of sorted) {
     const user = await getUserById(env.DB, w.userId);
     const handle = user?.username
-      ? `@${user.username}`
-      : `<a href="tg://user?id=${w.telegramId}">${user?.first_name ?? 'Winner'}</a>`;
-    lines.push(`${w.position}. ${handle} — ${w.entries} 🎟`);
+      ? `@${escapeHtml(user.username)}`
+      : `<a href="tg://user?id=${user?.telegram_id ?? ''}">${escapeHtml(user?.first_name ?? 'Winner')}</a>`;
+    lines.push(`🥇 ${w.position}. ${handle}`);
   }
-  lines.push('');
-  lines.push('Selamat kepada para pemenang! 🎊');
   return lines.join('\n');
 }
 

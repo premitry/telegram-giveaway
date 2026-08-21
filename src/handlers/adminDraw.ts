@@ -6,10 +6,9 @@ import { countParticipants } from '../db/participants';
 import {
   drawGiveaway,
   rerollWinner,
-  renderWinnersAnnouncement,
+  renderWinnersCardBlock,
   notifyWinners,
   listWinners,
-  type DrawnWinner,
 } from '../services/draw';
 import { updatePublishedCard } from '../services/giveaway';
 import { getUserById } from '../db/users';
@@ -20,14 +19,7 @@ export async function resolveTarget(env: Env, args: string[]): Promise<GiveawayR
   return getLatestGiveaway(env.DB);
 }
 
-async function announce(env: Env, giveaway: GiveawayRow, winners: DrawnWinner[]): Promise<void> {
-  const text = await renderWinnersAnnouncement(env, giveaway, winners);
-  if (giveaway.publish_chat_id) {
-    await sendMessage(env, giveaway.publish_chat_id, text);
-  }
-}
-
-/** /draw [id] — re-check membership, draw winners securely, announce, end giveaway. */
+/** /draw [id] — re-check membership, draw winners securely, show them in the card, end giveaway. */
 export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]): Promise<void> {
   const chatId = message.chat.id;
   const giveaway = await resolveTarget(env, args);
@@ -42,8 +34,9 @@ export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]
   await setGiveawayStatus(env.DB, giveaway.id, 'ended');
 
   const count = await countParticipants(env.DB, giveaway.id);
-  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false);
-  await announce(env, giveaway, winners);
+  const winnersHtml = await renderWinnersCardBlock(env, winners);
+  // Winners are embedded straight into the published card (no separate post).
+  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
 
   if (winners.length === 0) {
     await sendMessage(env, chatId, '⚠️ Tidak ada pemenang eligible (semua kandidat gagal cek membership).');
@@ -52,7 +45,7 @@ export async function cmdDraw(env: Env, message: TelegramMessage, args: string[]
     await sendMessage(
       env,
       chatId,
-      `✅ Draw selesai. ${winners.length} pemenang terpilih & diumumkan.\n📩 Notif DM terkirim ke ${dm}/${winners.length} pemenang.`,
+      `✅ Draw selesai. ${winners.length} pemenang terpilih & ditampilkan di kartu giveaway.\n📩 Notif DM terkirim ke ${dm}/${winners.length} pemenang.`,
     );
   }
 }
@@ -76,12 +69,16 @@ export async function cmdReroll(env: Env, message: TelegramMessage, args: string
   const user = await getUserById(env.DB, replacement.userId);
   const handle = user?.username ? `@${user.username}` : (user?.first_name ?? 'Winner');
   const winners = await listWinners(env, giveaway.id);
+  // Refresh the embedded winners list in the card.
+  const winnersHtml = await renderWinnersCardBlock(
+    env,
+    winners.map((w) => ({ position: w.position, userId: w.user_id })),
+  );
+  const count = await countParticipants(env.DB, giveaway.id);
+  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
   await sendMessage(
     env,
     chatId,
-    `🔁 Posisi #${position} diganti menjadi <b>${handle}</b> (${replacement.entries} 🎟).\nTotal pemenang sekarang: ${winners.length}.`,
+    `🔁 Posisi #${position} diganti menjadi <b>${handle}</b> (${replacement.entries} 🎟).\nKartu giveaway diperbarui. Total pemenang: ${winners.length}.`,
   );
-  if (giveaway.publish_chat_id) {
-    await sendMessage(env, giveaway.publish_chat_id, `🔁 <b>Reroll</b> — pemenang posisi #${position} diperbarui: ${handle}`);
-  }
 }

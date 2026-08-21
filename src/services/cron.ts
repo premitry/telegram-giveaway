@@ -1,9 +1,8 @@
 import type { Env } from '../types';
-import { sendMessage } from '../telegram/api';
 import { getExpiredActive, setGiveawayStatus } from '../db/giveaways';
 import { countParticipants } from '../db/participants';
 import { updatePublishedCard } from './giveaway';
-import { drawGiveaway, renderWinnersAnnouncement, notifyWinners } from './draw';
+import { drawGiveaway, renderWinnersCardBlock, notifyWinners } from './draw';
 import { sendBroadcastBatch } from './broadcast';
 import { nowIso } from '../utils/datetime';
 
@@ -33,11 +32,9 @@ export async function runCron(env: Env): Promise<void> {
         const winners = await drawGiveaway(env, g);
         await setGiveawayStatus(env.DB, g.id, 'ended');
         const count = await countParticipants(env.DB, g.id);
-        await updatePublishedCard(env, { ...g, status: 'ended' }, count, false);
-        if (g.publish_chat_id) {
-          const text = await renderWinnersAnnouncement(env, g, winners);
-          await sendMessage(env, g.publish_chat_id, text);
-        }
+        const winnersHtml = await renderWinnersCardBlock(env, winners);
+        // Winners shown directly inside the card (no separate announcement post).
+        await updatePublishedCard(env, { ...g, status: 'ended' }, count, false, winnersHtml);
         await notifyWinners(env, g, winners);
         console.log(`cron: auto-drew giveaway #${g.id} (${winners.length} winners)`);
       } else {
