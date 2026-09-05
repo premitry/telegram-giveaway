@@ -1,7 +1,7 @@
 import type { Env, GiveawayRow, WinnerRow } from '../types';
 import { listWeightedParticipants } from '../db/participants';
 import { isChannelMember } from './membership';
-import { drawWinners, type WeightedEntry } from '../utils/random';
+import { drawWinners, repeatWinnerWeight, type WeightedEntry } from '../utils/random';
 import { getUserById } from '../db/users';
 import { sendMessage } from '../telegram/api';
 import { escapeHtml } from '../utils/formatting';
@@ -33,14 +33,35 @@ async function currentWinnerUserIds(env: Env, giveawayId: number): Promise<Set<n
 }
 
 /**
- * Draw winners with a fresh membership re-check and secure weighted selection.
+ * How many times each user has won in OTHER giveaways (all-time), keyed by
+ * user_id. Used to shrink a repeat winner's odds so the prizes rotate — it
+ * self-balances over time, since whoever won least keeps the highest weight.
+ */
+async function pastWinCounts(env: Env, excludeGiveawayId: number): Promise<Record<number, number>> {
+  const res = await env.DB.prepare(
+    `SELECT user_id AS uid, COUNT(*) AS c FROM winners WHERE giveaway_id != ? GROUP BY user_id`,
+  )
+    .bind(excludeGiveawayId)
+    .all<{ uid: number; c: number }>();
+  const map: Record<number, number> = {};
+  for (const r of res.results ?? []) map[r.uid] = r.c;
+  return map;
+}
+
+/**
+ * Draw winners with a fresh membership re-check and secure random selection.
+ * Everyone starts with an equal chance; anyone who already won a PREVIOUS
+ * giveaway gets their odds halved per past win (never to zero).
  * Replaces any previously stored winners for this giveaway.
  */
 export async function drawGiveaway(env: Env, giveaway: GiveawayRow): Promise<DrawnWinner[]> {
   const pool = await listWeightedParticipants(env.DB, giveaway.id);
   const eligible = await filterEligible(env, giveaway, pool);
+  const past = await pastWinCounts(env, giveaway.id);
 
-  const selected = drawWinners(eligible, giveaway.winners_count);
+  const selected = drawWinners(eligible, giveaway.winners_count, (p) =>
+    repeatWinnerWeight(past[p.userId] ?? 0),
+  );
 
   await env.DB.prepare(`DELETE FROM winners WHERE giveaway_id = ?`).bind(giveaway.id).run();
 
@@ -61,7 +82,8 @@ export async function drawGiveaway(env: Env, giveaway: GiveawayRow): Promise<Dra
 
 /**
  * Reroll a single position: pick a replacement excluding all current winners,
- * re-checking membership. Returns the new winner, or null if no candidate remains.
+ * re-checking membership and applying the same past-winner penalty.
+ * Returns the new winner, or null if no candidate remains.
  */
 export async function rerollWinner(
   env: Env,
@@ -73,7 +95,8 @@ export async function rerollWinner(
     (p) => !existing.has(p.userId),
   );
   const eligible = await filterEligible(env, giveaway, pool);
-  const [replacement] = drawWinners(eligible, 1);
+  const past = await pastWinCounts(env, giveaway.id);
+  const [replacement] = drawWinners(eligible, 1, (p) => repeatWinnerWeight(past[p.userId] ?? 0));
   if (!replacement) return null;
 
   await env.DB.prepare(`DELETE FROM winners WHERE giveaway_id = ? AND position = ?`)

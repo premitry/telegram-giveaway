@@ -57,7 +57,7 @@ export async function cmdParticipants(env: Env, message: TelegramMessage, args: 
       `• Total peserta: <b>${participants}</b>`,
       `• Pemenang diundi: <b>${g.winners_count}</b>`,
       '',
-      '🎲 Pemenang dipilih acak — semua peserta peluang sama.',
+      '🎲 Pemenang dipilih acak. Yang belum pernah menang peluangnya lebih besar.',
     ].join('\n'),
   );
 }

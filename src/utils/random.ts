@@ -26,19 +26,50 @@ export interface WeightedEntry {
   entries: number;
 }
 
+/** Weight of a first-time candidate. Halved per previous win, floored at 1. */
+export const FRESH_WEIGHT = 1024;
+/** Beyond this many past wins the weight stops shrinking (stays at 1/1024). */
+const MAX_PENALIZED_WINS = 10;
+
 /**
- * Secure UNWEIGHTED random selection without replacement — every candidate has
- * an equal chance regardless of their entry count (referrals/invites do NOT
- * boost odds). The `entries` field is kept for display only.
- * Already-selected winners are removed from the pool before the next pick.
+ * Chance multiplier for a candidate who already won `pastWins` giveaways before:
+ * halved per win (1 win → 50%, 2 → 25%, 3 → 12.5%, …), never zero — a repeat
+ * winner stays possible, just far less likely than someone who never won.
  */
-export function drawWinners(pool: WeightedEntry[], count: number): WeightedEntry[] {
-  const remaining = [...pool];
+export function repeatWinnerWeight(pastWins: number): number {
+  if (pastWins <= 0) return FRESH_WEIGHT;
+  return FRESH_WEIGHT / 2 ** Math.min(pastWins, MAX_PENALIZED_WINS);
+}
+
+/**
+ * Secure random selection without replacement, weighted by `weightOf` (higher =
+ * more likely). Weights are integers ≥ 1, so no candidate is ever excluded.
+ * Already-selected winners are removed from the pool before the next pick.
+ * Pass a constant weightOf for an equal-chance draw.
+ *
+ * Note: `entries` (referral bonus) is NOT used here — invites still don't buy odds.
+ */
+export function drawWinners(
+  pool: WeightedEntry[],
+  count: number,
+  weightOf: (entry: WeightedEntry) => number = () => 1,
+): WeightedEntry[] {
+  const remaining = pool.map((entry) => ({
+    entry,
+    weight: Math.max(1, Math.round(weightOf(entry))),
+  }));
   const winners: WeightedEntry[] = [];
 
   while (winners.length < count && remaining.length > 0) {
-    const idx = secureRandomBelow(remaining.length);
-    winners.push(remaining[idx]);
+    const total = remaining.reduce((sum, r) => sum + r.weight, 0);
+    let ticket = secureRandomBelow(total);
+    let idx = 0;
+    while (idx < remaining.length - 1) {
+      ticket -= remaining[idx].weight;
+      if (ticket < 0) break;
+      idx++;
+    }
+    winners.push(remaining[idx].entry);
     remaining.splice(idx, 1);
   }
   return winners;

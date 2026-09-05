@@ -41,14 +41,14 @@ const HOWTO = [
   '2️⃣ Kalau diminta, <b>join channel</b> dulu lalu tekan <b>CHECK AGAIN</b>.',
   '3️⃣ Sudah! Tinggal tunggu pengumuman pemenang.',
   '',
-  '🎲 Pemenang dipilih <b>acak</b> — semua peserta punya peluang sama.',
+  '🎲 Pemenang dipilih <b>acak</b>. Yang <b>belum pernah menang</b> peluangnya lebih besar — pernah menang bukan berarti nggak bisa menang lagi, cuma peluangnya lebih kecil.',
 ].join('\n');
 
 /** "You're in" confirmation shown after a successful (or repeat) join. */
 const PARTICIPATING_TEXT = [
   "✅ <b>Kamu sudah ikut giveaway ini!</b>",
   '',
-  '🎲 Pemenang dipilih acak saat deadline — semua peserta peluang sama.',
+  '🎲 Pemenang dipilih acak saat deadline. Yang belum pernah menang peluangnya lebih besar.',
   'Kalau menang, kamu bakal dapat notif di sini. Good luck! 🍀',
 ].join('\n');
 
@@ -257,7 +257,7 @@ async function handleDrawPick(env: Env, cq: CallbackQuery, giveawayId: number): 
     '',
     `Status: <b>${g.status}</b> • Peserta: <b>${count}</b> • Pemenang: <b>${g.winners_count}</b>`,
     '',
-    'Bot cek ulang membership channel tiap kandidat, pilih pemenang <b>acak (semua peserta peluang sama)</b>, tampilkan di kartu & DM pemenang. Giveaway jadi <b>ended</b>.',
+    'Bot cek ulang membership channel tiap kandidat, pilih pemenang <b>acak</b> (peluang pemenang giveaway sebelumnya dikecilkan ½ per kemenangan, tapi tetap bisa kepilih), tampilkan di kartu & DM pemenang. Giveaway jadi <b>ended</b>.',
   ].join('\n');
   const msg = cq.message;
   if (msg) {
