@@ -16,7 +16,11 @@ export function channelUrl(giveaway: GiveawayRow): string {
   return `https://t.me/${handle}`;
 }
 
-/** True when the user is a member/administrator/creator of the required channel. */
+/**
+ * True when Telegram currently reports the user as present in the required chat.
+ * `restricted` only counts for supergroups when Telegram explicitly says the user
+ * is still a member; `left` and `kicked` never count.
+ */
 export async function isChannelMember(
   env: Env,
   giveaway: GiveawayRow,
@@ -28,5 +32,6 @@ export async function isChannelMember(
     console.warn(`membership check failed for user ${telegramUserId}: ${res.description}`);
     return false;
   }
-  return VALID_STATUSES.has(res.result.status);
+  return VALID_STATUSES.has(res.result.status) ||
+    (res.result.status === 'restricted' && res.result.is_member === true);
 }

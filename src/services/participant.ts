@@ -26,10 +26,10 @@ export async function joinGiveaway(
   if (giveaway.status !== 'active') return { status: 'inactive' };
 
   const existing = await getParticipant(env.DB, giveaway.id, user.id);
-  if (existing) return { status: 'already', participant: existing };
-
   const member = await isChannelMember(env, giveaway, tgUser.id);
   if (!member) return { status: 'not_member' };
+
+  if (existing) return { status: 'already', participant: existing };
 
   const inserted = await insertParticipant(env.DB, giveaway.id, user.id);
   if (!inserted) {

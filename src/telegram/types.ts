@@ -74,6 +74,8 @@ export interface TelegramUpdate {
 export interface ChatMember {
   status: 'creator' | 'administrator' | 'member' | 'restricted' | 'left' | 'kicked';
   user: TelegramUser;
+  /** Telegram sets this for restricted users who are still present in a supergroup. */
+  is_member?: boolean;
 }
 
 export interface InlineKeyboardButton {
