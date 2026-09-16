@@ -2,11 +2,11 @@ import type { Env, GiveawayRow, ParticipantRow } from '../types';
 import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
 import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '../db/giveaways';
-import { getUserByTelegramId, countUsers } from '../db/users';
+import { getUserById, getUserByTelegramId, countUsers } from '../db/users';
 import { countParticipants, countParticipantsAll } from '../db/participants';
 import { joinGiveaway } from '../services/participant';
 import { updatePublishedCard, renderCaption, parsePrizes } from '../services/giveaway';
-import { channelUrl } from '../services/membership';
+import { channelUrl, checkChannelMembership } from '../services/membership';
 import { escapeHtml } from '../utils/formatting';
 import {
   notEligibleKeyboard,
@@ -21,8 +21,14 @@ import {
   publishListKeyboard,
 } from '../telegram/keyboards';
 import { handleWizardCallback, startWizard, startRepublish } from './admin';
-import { executeDraw, executeReroll } from './adminDraw';
-import { listWinners, renderWinnersCardBlock } from '../services/draw';
+import { executeDraw, executeGuardedReroll } from './adminDraw';
+import {
+  auditWinnerMemberships,
+  getWinnerAtPosition,
+  listWinners,
+  renderWinnersCardBlock,
+  type WinnerMembershipAudit,
+} from '../services/draw';
 import { isAdmin } from './auth';
 import { WELCOME } from './start';
 
@@ -306,16 +312,21 @@ async function handleDraw(env: Env, cq: CallbackQuery, giveawayId: number): Prom
   );
 }
 
-/**
- * Winners-management view for an ended giveaway: lists the winners and offers a
- * reroll per position (for winners who don't respond) + a full redraw. Rendered
- * in place. An optional note is shown at the top (e.g. a draw/reroll result).
- */
+function winnerAuditLabel(audit: WinnerMembershipAudit): string {
+  if (audit.username) return `@${escapeHtml(audit.username)}`;
+  if (audit.telegramId) {
+    return `<a href="tg://user?id=${audit.telegramId}">${escapeHtml(audit.firstName ?? 'Winner')}</a>`;
+  }
+  return escapeHtml(audit.firstName ?? 'Winner');
+}
+
+/** Winners-management view. Position rerolls appear only after a live audit. */
 async function showWinnersManage(
   env: Env,
   cq: CallbackQuery,
   giveaway: GiveawayRow,
   note?: string,
+  audits?: WinnerMembershipAudit[],
 ): Promise<void> {
   const winners = await listWinners(env, giveaway.id);
   const block = await renderWinnersCardBlock(
@@ -329,9 +340,32 @@ async function showWinnersManage(
   lines.push(`<i>${giveaway.title}</i>`);
   lines.push('');
   lines.push(winners.length ? block : '(belum ada pemenang)');
-  lines.push('');
-  lines.push('🔁 Undi ulang posisi kalau pemenang tidak merespons:');
-  const keyboard = winnersManageKeyboard(giveaway.id, winners.map((w) => w.position));
+
+  if (audits) {
+    lines.push('');
+    lines.push('🔍 <b>Hasil cek membership saat ini:</b>');
+    for (const audit of audits) {
+      const icon = audit.status === 'member' ? '✅' : audit.status === 'not_member' ? '❌' : '⚠️';
+      const status = audit.status === 'member'
+        ? 'masih join'
+        : audit.status === 'not_member'
+          ? 'sudah tidak join'
+          : 'gagal diverifikasi';
+      lines.push(`${icon} #${audit.position} ${winnerAuditLabel(audit)} — ${status}`);
+    }
+    if (audits.some((audit) => audit.status === 'unknown')) {
+      lines.push('');
+      lines.push('⚠️ Yang gagal diverifikasi tidak bisa di-reroll. Tekan cek lagi nanti.');
+    }
+  } else if (winners.length) {
+    lines.push('');
+    lines.push('Tekan tombol cek untuk melihat membership terbaru pemenang.');
+  }
+
+  const nonMembers = audits
+    ?.filter((audit) => audit.status === 'not_member')
+    .map((audit) => ({ position: audit.position, userId: audit.userId })) ?? [];
+  const keyboard = winnersManageKeyboard(giveaway.id, nonMembers);
   const msg = cq.message;
   if (msg) {
     await editMessageText(env, cq.from.id, msg.message_id, lines.join('\n'), { reply_markup: keyboard });
@@ -340,23 +374,88 @@ async function showWinnersManage(
   }
 }
 
-/** Reroll a single winner position (admin-only), then refresh the manage view. */
-async function handleReroll(env: Env, cq: CallbackQuery, giveawayId: number, position: number): Promise<void> {
+async function handleWinnerMembershipCheck(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+): Promise<void> {
   if (!(await isAdmin(env, cq.from.id))) {
     await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
     return;
   }
-  const g = await getGiveaway(env.DB, giveawayId);
-  if (!g) {
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
     await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
     return;
   }
+  if (giveaway.status !== 'ended') {
+    await answerCallback(env, cq.id, 'Giveaway ini belum selesai.', true);
+    return;
+  }
+
+  await answerCallback(env, cq.id, '🔍 Mengecek membership pemenang…');
+  const audits = await auditWinnerMemberships(env, giveaway);
+  if (audits.length === 0) {
+    await showWinnersManage(env, cq, giveaway, 'Belum ada pemenang.');
+    return;
+  }
+  await showWinnersManage(env, cq, giveaway, undefined, audits);
+}
+
+/** Reroll only when the current winner is freshly confirmed as a non-member. */
+async function handleReroll(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+  position: number,
+  auditedUserId: number,
+): Promise<void> {
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return;
+  }
+  if (giveaway.status !== 'ended' || position < 1) {
+    await answerCallback(env, cq.id, 'Posisi ini tidak bisa di-reroll.', true);
+    return;
+  }
+
+  const winner = await getWinnerAtPosition(env, giveaway.id, position);
+  if (!winner || winner.user_id !== auditedUserId) {
+    await answerCallback(env, cq.id, 'Posisi pemenang sudah berubah atau tidak ada.', true);
+    await showWinnersManage(env, cq, giveaway, '⚠️ Tombol reroll sudah tidak berlaku.');
+    return;
+  }
+  const user = await getUserById(env.DB, winner.user_id);
+  if (!user) {
+    await answerCallback(env, cq.id, 'Data pemenang tidak bisa diverifikasi.', true);
+    return;
+  }
+
+  const membership = await checkChannelMembership(env, giveaway, user.telegram_id);
+  if (membership === 'member') {
+    await answerCallback(env, cq.id, '✅ Pemenang sudah join kembali, reroll dibatalkan.', true);
+    await showWinnersManage(env, cq, giveaway, `✅ Posisi #${position} sudah join kembali. Tidak diganti.`);
+    return;
+  }
+  if (membership === 'unknown') {
+    await answerCallback(env, cq.id, '⚠️ Membership gagal diverifikasi. Coba cek lagi nanti.', true);
+    await showWinnersManage(env, cq, giveaway, `⚠️ Posisi #${position} gagal diverifikasi. Tidak diganti.`);
+    return;
+  }
+
   await answerCallback(env, cq.id, '🔁 Mengundi ulang…');
-  const { replacement } = await executeReroll(env, g, position);
-  const note = replacement
+  const result = await executeGuardedReroll(env, giveaway, position, winner.user_id);
+  const note = result.status === 'replaced'
     ? `🔁 Posisi #${position} diganti & pemenang baru dinotif.`
-    : `⚠️ Posisi #${position}: tidak ada kandidat pengganti yang eligible.`;
-  await showWinnersManage(env, cq, g, note);
+    : result.status === 'no_candidate'
+      ? `⚠️ Posisi #${position}: tidak ada kandidat pengganti yang eligible.`
+      : `⚠️ Posisi #${position} sudah berubah. Tidak ada pemenang yang diganti.`;
+  await showWinnersManage(env, cq, giveaway, note);
 }
 
 /** Redraw ALL winners for an ended giveaway (admin-only), then refresh the view. */
@@ -527,10 +626,18 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
     case 'rrall':
       await handleRedrawAll(env, cq, giveawayId);
       return;
+    case 'wcheck':
+      await handleWinnerMembershipCheck(env, cq, giveawayId);
+      return;
     case 'rrpos': {
-      const pos = Number(data.split(':')[2]);
-      if (!Number.isInteger(pos)) { await answerCallback(env, cq.id); return; }
-      await handleReroll(env, cq, giveawayId, pos);
+      const [, , posStr, userIdStr] = data.split(':');
+      const pos = Number(posStr);
+      const auditedUserId = Number(userIdStr);
+      if (!Number.isInteger(pos) || pos < 1 || !Number.isInteger(auditedUserId)) {
+        await answerCallback(env, cq.id, 'Tombol reroll sudah tidak berlaku.', true);
+        return;
+      }
+      await handleReroll(env, cq, giveawayId, pos, auditedUserId);
       return;
     }
     case 'delcfm':

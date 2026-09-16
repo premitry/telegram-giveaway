@@ -3,6 +3,8 @@ import { getChatMember } from '../telegram/api';
 
 const VALID_STATUSES = new Set(['member', 'administrator', 'creator']);
 
+export type MembershipStatus = 'member' | 'not_member' | 'unknown';
+
 /** The chat identifier to query: prefer the numeric id, fall back to @username. */
 export function channelIdentifier(giveaway: GiveawayRow): string {
   return giveaway.required_channel_id ?? giveaway.required_channel;
@@ -17,21 +19,38 @@ export function channelUrl(giveaway: GiveawayRow): string {
 }
 
 /**
- * True when Telegram currently reports the user as present in the required chat.
- * `restricted` only counts for supergroups when Telegram explicitly says the user
- * is still a member; `left` and `kicked` never count.
+ * Current membership reported by Telegram. API/configuration failures stay
+ * `unknown` so administrative checks never mistake an outage for a departed user.
+ */
+export async function checkChannelMembership(
+  env: Env,
+  giveaway: GiveawayRow,
+  telegramUserId: string | number,
+): Promise<MembershipStatus> {
+  const res = await getChatMember(env, channelIdentifier(giveaway), telegramUserId);
+  if (!res.ok || !res.result) {
+    console.warn(`membership check failed for user ${telegramUserId}: ${res.description}`);
+    return 'unknown';
+  }
+
+  if (VALID_STATUSES.has(res.result.status)) return 'member';
+  if (res.result.status === 'restricted') {
+    return res.result.is_member === true ? 'member' : 'not_member';
+  }
+  if (res.result.status === 'left' || res.result.status === 'kicked') return 'not_member';
+
+  console.warn(`membership check returned unknown status for user ${telegramUserId}`);
+  return 'unknown';
+}
+
+/**
+ * Fail-closed boolean wrapper used by JOIN and winner selection. Only a positive
+ * current membership response counts as eligible.
  */
 export async function isChannelMember(
   env: Env,
   giveaway: GiveawayRow,
   telegramUserId: string | number,
 ): Promise<boolean> {
-  const res = await getChatMember(env, channelIdentifier(giveaway), telegramUserId);
-  if (!res.ok || !res.result) {
-    // Common cause: the bot is not an admin of the channel, or the user is not found.
-    console.warn(`membership check failed for user ${telegramUserId}: ${res.description}`);
-    return false;
-  }
-  return VALID_STATUSES.has(res.result.status) ||
-    (res.result.status === 'restricted' && res.result.is_member === true);
+  return (await checkChannelMembership(env, giveaway, telegramUserId)) === 'member';
 }

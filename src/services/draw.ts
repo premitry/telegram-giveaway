@@ -1,6 +1,10 @@
 import type { Env, GiveawayRow, WinnerRow } from '../types';
 import { listWeightedParticipants } from '../db/participants';
-import { isChannelMember } from './membership';
+import {
+  checkChannelMembership,
+  isChannelMember,
+  type MembershipStatus,
+} from './membership';
 import { drawWinners, repeatWinnerWeight, type WeightedEntry } from '../utils/random';
 import { getUserById } from '../db/users';
 import { sendMessage } from '../telegram/api';
@@ -14,6 +18,19 @@ export interface DrawnWinner {
   telegramId: string;
   entries: number;
 }
+
+export interface WinnerMembershipAudit {
+  position: number;
+  userId: number;
+  telegramId: string | null;
+  username: string | null;
+  firstName: string | null;
+  status: MembershipStatus;
+}
+
+export type GuardedRerollResult =
+  | { status: 'replaced'; replacement: DrawnWinner }
+  | { status: 'no_candidate' | 'missing' | 'stale' };
 
 /** Re-check channel membership for a set of candidates, keeping only eligible ones. */
 async function filterEligible(env: Env, giveaway: GiveawayRow, pool: WeightedEntry[]): Promise<WeightedEntry[]> {
@@ -30,6 +47,42 @@ async function currentWinnerUserIds(env: Env, giveawayId: number): Promise<Set<n
     .bind(giveawayId)
     .all<{ user_id: number }>();
   return new Set((res.results ?? []).map((r) => r.user_id));
+}
+
+export function getWinnerAtPosition(
+  env: Env,
+  giveawayId: number,
+  position: number,
+): Promise<WinnerRow | null> {
+  return env.DB.prepare(
+    `SELECT * FROM winners WHERE giveaway_id = ? AND position = ?`,
+  )
+    .bind(giveawayId, position)
+    .first<WinnerRow>();
+}
+
+/** Live snapshot of every current winner's required-channel membership. */
+export async function auditWinnerMemberships(
+  env: Env,
+  giveaway: GiveawayRow,
+): Promise<WinnerMembershipAudit[]> {
+  const winners = await listWinners(env, giveaway.id);
+  const audits: WinnerMembershipAudit[] = [];
+  for (const winner of winners) {
+    const user = await getUserById(env.DB, winner.user_id);
+    const status = user
+      ? await checkChannelMembership(env, giveaway, user.telegram_id)
+      : 'unknown';
+    audits.push({
+      position: winner.position,
+      userId: winner.user_id,
+      telegramId: user?.telegram_id ?? null,
+      username: user?.username ?? null,
+      firstName: user?.first_name ?? null,
+      status,
+    });
+  }
+  return audits;
 }
 
 /**
@@ -80,40 +133,67 @@ export async function drawGiveaway(env: Env, giveaway: GiveawayRow): Promise<Dra
   return drawn;
 }
 
-/**
- * Reroll a single position: pick a replacement excluding all current winners,
- * re-checking membership and applying the same past-winner penalty.
- * Returns the new winner, or null if no candidate remains.
- */
-export async function rerollWinner(
+async function pickReplacement(
   env: Env,
   giveaway: GiveawayRow,
-  position: number,
-): Promise<DrawnWinner | null> {
+): Promise<WeightedEntry | null> {
   const existing = await currentWinnerUserIds(env, giveaway.id);
   const pool = (await listWeightedParticipants(env.DB, giveaway.id)).filter(
     (p) => !existing.has(p.userId),
   );
   const eligible = await filterEligible(env, giveaway, pool);
   const past = await pastWinCounts(env, giveaway.id);
-  const [replacement] = drawWinners(eligible, 1, (p) => repeatWinnerWeight(past[p.userId] ?? 0));
-  if (!replacement) return null;
+  return drawWinners(eligible, 1, (p) => repeatWinnerWeight(past[p.userId] ?? 0))[0] ?? null;
+}
 
-  await env.DB.prepare(`DELETE FROM winners WHERE giveaway_id = ? AND position = ?`)
-    .bind(giveaway.id, position)
-    .run();
-  await env.DB.prepare(
-    `INSERT INTO winners (giveaway_id, user_id, position, selected_at) VALUES (?, ?, ?, ?)`,
+/**
+ * Replace a position only if it is still occupied by the expected winner. The
+ * conditional update prevents delayed/double callback clicks from replacing a
+ * newer winner or creating a winner at a missing position.
+ */
+export async function rerollWinnerGuarded(
+  env: Env,
+  giveaway: GiveawayRow,
+  position: number,
+  expectedUserId: number,
+): Promise<GuardedRerollResult> {
+  const current = await getWinnerAtPosition(env, giveaway.id, position);
+  if (!current) return { status: 'missing' };
+  if (current.user_id !== expectedUserId) return { status: 'stale' };
+
+  const replacement = await pickReplacement(env, giveaway);
+  if (!replacement) return { status: 'no_candidate' };
+
+  const updated = await env.DB.prepare(
+    `UPDATE winners
+        SET user_id = ?, selected_at = ?
+      WHERE giveaway_id = ? AND position = ? AND user_id = ?`,
   )
-    .bind(giveaway.id, replacement.userId, position, nowIso())
+    .bind(replacement.userId, nowIso(), giveaway.id, position, expectedUserId)
     .run();
+  if ((updated.meta.changes ?? 0) === 0) return { status: 'stale' };
 
   return {
-    position,
-    userId: replacement.userId,
-    telegramId: replacement.telegramId,
-    entries: replacement.entries,
+    status: 'replaced',
+    replacement: {
+      position,
+      userId: replacement.userId,
+      telegramId: replacement.telegramId,
+      entries: replacement.entries,
+    },
   };
+}
+
+/** Manual admin reroll. Missing positions are rejected rather than inserted. */
+export async function rerollWinner(
+  env: Env,
+  giveaway: GiveawayRow,
+  position: number,
+): Promise<DrawnWinner | null> {
+  const current = await getWinnerAtPosition(env, giveaway.id, position);
+  if (!current) return null;
+  const result = await rerollWinnerGuarded(env, giveaway, position, current.user_id);
+  return result.status === 'replaced' ? result.replacement : null;
 }
 
 export async function listWinners(env: Env, giveawayId: number): Promise<WinnerRow[]> {

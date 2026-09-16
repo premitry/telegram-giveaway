@@ -6,6 +6,7 @@ import { countParticipants } from '../db/participants';
 import {
   drawGiveaway,
   rerollWinner,
+  rerollWinnerGuarded,
   renderWinnersCardBlock,
   notifyWinners,
   listWinners,
@@ -45,24 +46,46 @@ export async function executeDraw(
  * Shared by /reroll and the button-driven reroll. Returns the replacement (or
  * null if no eligible candidate) plus the up-to-date winners list.
  */
+async function refreshAfterReroll(
+  env: Env,
+  giveaway: GiveawayRow,
+  replacement: NonNullable<Awaited<ReturnType<typeof rerollWinner>>>,
+): Promise<Awaited<ReturnType<typeof listWinners>>> {
+  const winners = await listWinners(env, giveaway.id);
+  const winnersHtml = await renderWinnersCardBlock(
+    env,
+    winners.map((w) => ({ position: w.position, userId: w.user_id })),
+    parsePrizes(giveaway),
+  );
+  const count = await countParticipants(env.DB, giveaway.id);
+  await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
+  await notifyWinners(env, giveaway, [replacement]);
+  return winners;
+}
+
 export async function executeReroll(
   env: Env,
   giveaway: GiveawayRow,
   position: number,
 ): Promise<{ replacement: Awaited<ReturnType<typeof rerollWinner>>; winners: Awaited<ReturnType<typeof listWinners>> }> {
   const replacement = await rerollWinner(env, giveaway, position);
-  const winners = await listWinners(env, giveaway.id);
-  if (replacement) {
-    const winnersHtml = await renderWinnersCardBlock(
-      env,
-      winners.map((w) => ({ position: w.position, userId: w.user_id })),
-      parsePrizes(giveaway),
-    );
-    const count = await countParticipants(env.DB, giveaway.id);
-    await updatePublishedCard(env, { ...giveaway, status: 'ended' }, count, false, winnersHtml);
-    await notifyWinners(env, giveaway, [replacement]);
-  }
+  const winners = replacement
+    ? await refreshAfterReroll(env, giveaway, replacement)
+    : await listWinners(env, giveaway.id);
   return { replacement, winners };
+}
+
+export async function executeGuardedReroll(
+  env: Env,
+  giveaway: GiveawayRow,
+  position: number,
+  expectedUserId: number,
+): Promise<Awaited<ReturnType<typeof rerollWinnerGuarded>>> {
+  const result = await rerollWinnerGuarded(env, giveaway, position, expectedUserId);
+  if (result.status === 'replaced') {
+    await refreshAfterReroll(env, giveaway, result.replacement);
+  }
+  return result;
 }
 
 /** /draw [id] — re-check membership, draw winners securely, show them in the card, end giveaway. */

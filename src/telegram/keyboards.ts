@@ -67,11 +67,22 @@ export function publishListKeyboard(giveaways: GiveawayPick[]): InlineKeyboardMa
   return { inline_keyboard: rows };
 }
 
-/** Winners management for an ended giveaway: reroll a position or redraw all. */
-export function winnersManageKeyboard(giveawayId: number, positions: number[]): InlineKeyboardMarkup {
-  const rows: InlineKeyboardButton[][] = positions.map((p) => [
-    { text: `🔁 Undi Ulang #${p}`, callback_data: `rrpos:${giveawayId}:${p}` },
-  ]);
+/** Winners management for an ended giveaway. Position rerolls need a live audit. */
+export function winnersManageKeyboard(
+  giveawayId: number,
+  nonMembers: Array<{ position: number; userId: number }> = [],
+): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = [
+    [{ text: '🔍 Cek Membership Pemenang', callback_data: `wcheck:${giveawayId}` }],
+  ];
+  for (const winner of nonMembers) {
+    rows.push([
+      {
+        text: `🔁 Reroll #${winner.position}`,
+        callback_data: `rrpos:${giveawayId}:${winner.position}:${winner.userId}`,
+      },
+    ]);
+  }
   rows.push([{ text: '🔁 Undi Ulang Semua', callback_data: `rrall:${giveawayId}` }]);
   rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:drawlist' }]);
   return { inline_keyboard: rows };
