@@ -67,9 +67,10 @@ export function publishListKeyboard(giveaways: GiveawayPick[]): InlineKeyboardMa
   return { inline_keyboard: rows };
 }
 
-/** Winners management for an ended giveaway. Position rerolls need a live audit. */
+/** Winners management for an ended giveaway. */
 export function winnersManageKeyboard(
   giveawayId: number,
+  winners: Array<{ position: number; userId: number }> = [],
   nonMembers: Array<{ position: number; userId: number }> = [],
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [
@@ -78,14 +79,39 @@ export function winnersManageKeyboard(
   for (const winner of nonMembers) {
     rows.push([
       {
-        text: `🔁 Reroll #${winner.position}`,
+        text: `🔁 Reroll #${winner.position} (sudah keluar)`,
         callback_data: `rrpos:${giveawayId}:${winner.position}:${winner.userId}`,
+      },
+    ]);
+  }
+  for (const winner of winners) {
+    rows.push([
+      {
+        text: `🎟 Ganti #${winner.position} (tidak claim)`,
+        callback_data: `rmpick:${giveawayId}:${winner.position}:${winner.userId}`,
       },
     ]);
   }
   rows.push([{ text: '🔁 Undi Ulang Semua', callback_data: `rrall:${giveawayId}` }]);
   rows.push([{ text: '⬅️ Kembali', callback_data: 'menu:drawlist' }]);
   return { inline_keyboard: rows };
+}
+
+/** Confirm a manual single-position reroll while preserving the expected winner. */
+export function manualRerollConfirmKeyboard(
+  giveawayId: number,
+  position: number,
+  expectedUserId: number,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{
+        text: `🔁 Ya, ganti pemenang #${position}`,
+        callback_data: `rmcfm:${giveawayId}:${position}:${expectedUserId}`,
+      }],
+      [{ text: '⬅️ Batal', callback_data: `wmanage:${giveawayId}` }],
+    ],
+  };
 }
 
 /** Confirm/cancel buttons for the destructive /delete command. */

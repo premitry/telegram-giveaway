@@ -9,7 +9,10 @@ import {
   rerollWinnerGuarded,
 } from '../src/services/draw';
 import { checkChannelMembership } from '../src/services/membership';
-import { winnersManageKeyboard } from '../src/telegram/keyboards';
+import {
+  manualRerollConfirmKeyboard,
+  winnersManageKeyboard,
+} from '../src/telegram/keyboards';
 
 type QueryResult = { results?: unknown[]; meta?: { changes?: number } };
 
@@ -111,7 +114,15 @@ class FakeDb {
 
   all(sql: string, params: unknown[]): unknown[] {
     if (sql.includes('FROM participants p JOIN users u')) return this.drawPool;
-    if (sql.startsWith('SELECT user_id AS uid, COUNT(*) AS c FROM winners')) return [];
+    if (sql.startsWith('SELECT user_id AS uid, COUNT(*) AS c FROM winners')) {
+      const excludedGiveawayId = Number(params[0]);
+      const counts = new Map<number, number>();
+      for (const winner of this.winners) {
+        if (winner.giveaway_id === excludedGiveawayId) continue;
+        counts.set(winner.user_id, (counts.get(winner.user_id) ?? 0) + 1);
+      }
+      return [...counts].map(([uid, c]) => ({ uid, c }));
+    }
     if (sql.startsWith('SELECT user_id FROM winners WHERE giveaway_id')) {
       return this.winners
         .filter((winner) => winner.giveaway_id === Number(params[0]))
@@ -315,22 +326,36 @@ test('unknown membership remains fail-closed for JOIN and draw', { concurrency: 
   assert.deepEqual(drawDb.insertedWinners, []);
 });
 
-test('winner keyboard shows check always and reroll only for audited non-members', () => {
-  const initial = winnersManageKeyboard(giveaway.id);
+test('winner keyboard offers manual reroll for every winner and audited reroll only for non-members', () => {
+  const currentWinners = [
+    { position: 1, userId: 11 },
+    { position: 2, userId: 44 },
+  ];
+  const initial = winnersManageKeyboard(giveaway.id, currentWinners);
   assert.deepEqual(initial.inline_keyboard.map((row) => row[0]?.callback_data), [
     `wcheck:${giveaway.id}`,
+    `rmpick:${giveaway.id}:1:11`,
+    `rmpick:${giveaway.id}:2:44`,
     `rrall:${giveaway.id}`,
     'menu:drawlist',
   ]);
 
-  const audited = winnersManageKeyboard(giveaway.id, [
+  const audited = winnersManageKeyboard(giveaway.id, currentWinners, [
     { position: 2, userId: 44 },
   ]);
   assert.deepEqual(audited.inline_keyboard.map((row) => row[0]?.callback_data), [
     `wcheck:${giveaway.id}`,
     `rrpos:${giveaway.id}:2:44`,
+    `rmpick:${giveaway.id}:1:11`,
+    `rmpick:${giveaway.id}:2:44`,
     `rrall:${giveaway.id}`,
     'menu:drawlist',
+  ]);
+
+  const confirm = manualRerollConfirmKeyboard(giveaway.id, 2, 44);
+  assert.deepEqual(confirm.inline_keyboard.map((row) => row[0]?.callback_data), [
+    `rmcfm:${giveaway.id}:2:44`,
+    `wmanage:${giveaway.id}`,
   ]);
 });
 
@@ -416,6 +441,41 @@ test('guarded reroll replaces only with an eligible non-winner candidate', { con
   assert.equal(winners[0]?.user_id, 3);
   assert.equal(winners[1]?.user_id, 8);
   assert.equal(db.winnerUpdateAttempts, 1);
+});
+
+test('manual replacement removes the cancelled win while preserving valid wins elsewhere', { concurrency: false }, async () => {
+  const previousGiveawayId = 3;
+  const winners: WinnerRow[] = [
+    { id: 1, giveaway_id: giveaway.id, user_id: user.id, position: 1, selected_at: giveaway.created_at },
+    { id: 2, giveaway_id: previousGiveawayId, user_id: user.id, position: 1, selected_at: giveaway.created_at },
+  ];
+  const db = new FakeDb(user, [participant], [
+    { userId: 2, telegramId: '222', entries: 1 },
+  ], { winners });
+
+  const result = await withMembershipReplies(['member'], () =>
+    rerollWinnerGuarded(envWith(db), giveaway, 1, user.id),
+  );
+
+  assert.equal(result.status, 'replaced');
+  assert.equal(
+    winners.some((winner) =>
+      winner.giveaway_id === giveaway.id && winner.user_id === user.id,
+    ),
+    false,
+  );
+  assert.equal(
+    winners.some((winner) =>
+      winner.giveaway_id === previousGiveawayId && winner.user_id === user.id,
+    ),
+    true,
+  );
+  assert.equal(
+    db.participants.some((candidate) =>
+      candidate.giveaway_id === giveaway.id && candidate.user_id === user.id,
+    ),
+    true,
+  );
 });
 
 test('guarded reroll detects a winner change racing the conditional update', { concurrency: false }, async () => {

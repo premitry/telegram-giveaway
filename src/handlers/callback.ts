@@ -1,4 +1,4 @@
-import type { Env, GiveawayRow, ParticipantRow } from '../types';
+import type { Env, GiveawayRow, ParticipantRow, WinnerRow } from '../types';
 import type { CallbackQuery, InlineKeyboardMarkup } from '../telegram/types';
 import { answerCallback, sendMessage, editMessageText, getBotUsername, deleteMessage } from '../telegram/api';
 import { getGiveaway, getLatestGiveaway, listGiveaways, deleteGiveaway } from '../db/giveaways';
@@ -18,6 +18,7 @@ import {
   drawListKeyboard,
   drawPickConfirmKeyboard,
   winnersManageKeyboard,
+  manualRerollConfirmKeyboard,
   publishListKeyboard,
 } from '../telegram/keyboards';
 import { handleWizardCallback, startWizard, startRepublish } from './admin';
@@ -320,7 +321,7 @@ function winnerAuditLabel(audit: WinnerMembershipAudit): string {
   return escapeHtml(audit.firstName ?? 'Winner');
 }
 
-/** Winners-management view. Position rerolls appear only after a live audit. */
+/** Winners-management view with manual actions and membership audit results. */
 async function showWinnersManage(
   env: Env,
   cq: CallbackQuery,
@@ -365,13 +366,43 @@ async function showWinnersManage(
   const nonMembers = audits
     ?.filter((audit) => audit.status === 'not_member')
     .map((audit) => ({ position: audit.position, userId: audit.userId })) ?? [];
-  const keyboard = winnersManageKeyboard(giveaway.id, nonMembers);
+  const keyboard = winnersManageKeyboard(
+    giveaway.id,
+    winners.map((winner) => ({
+      position: winner.position,
+      userId: winner.user_id,
+    })),
+    nonMembers,
+  );
   const msg = cq.message;
   if (msg) {
     await editMessageText(env, cq.from.id, msg.message_id, lines.join('\n'), { reply_markup: keyboard });
   } else {
     await sendMessage(env, cq.from.id, lines.join('\n'), { reply_markup: keyboard });
   }
+}
+
+async function handleWinnersManage(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+): Promise<void> {
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return;
+  }
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return;
+  }
+  if (giveaway.status !== 'ended') {
+    await answerCallback(env, cq.id, 'Giveaway ini belum selesai.', true);
+    return;
+  }
+
+  await answerCallback(env, cq.id);
+  await showWinnersManage(env, cq, giveaway);
 }
 
 async function handleWinnerMembershipCheck(
@@ -456,6 +487,117 @@ async function handleReroll(
       ? `⚠️ Posisi #${position}: tidak ada kandidat pengganti yang eligible.`
       : `⚠️ Posisi #${position} sudah berubah. Tidak ada pemenang yang diganti.`;
   await showWinnersManage(env, cq, giveaway, note);
+}
+
+async function validateManualReroll(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+  position: number,
+  expectedUserId: number,
+): Promise<{ giveaway: GiveawayRow; winner: WinnerRow } | null> {
+  if (!(await isAdmin(env, cq.from.id))) {
+    await answerCallback(env, cq.id, '🚫 Khusus admin.', true);
+    return null;
+  }
+  const giveaway = await getGiveaway(env.DB, giveawayId);
+  if (!giveaway) {
+    await answerCallback(env, cq.id, 'Giveaway sudah tidak ada.', true);
+    return null;
+  }
+  if (giveaway.status !== 'ended' || position < 1) {
+    await answerCallback(env, cq.id, 'Posisi ini tidak bisa di-reroll.', true);
+    return null;
+  }
+
+  const winner = await getWinnerAtPosition(env, giveaway.id, position);
+  if (!winner || winner.user_id !== expectedUserId) {
+    await answerCallback(env, cq.id, 'Posisi pemenang sudah berubah atau tidak ada.', true);
+    await showWinnersManage(env, cq, giveaway, '⚠️ Tombol reroll manual sudah tidak berlaku.');
+    return null;
+  }
+  return { giveaway, winner };
+}
+
+async function handleManualRerollPick(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+  position: number,
+  expectedUserId: number,
+): Promise<void> {
+  const validated = await validateManualReroll(
+    env,
+    cq,
+    giveawayId,
+    position,
+    expectedUserId,
+  );
+  if (!validated) return;
+
+  const user = await getUserById(env.DB, validated.winner.user_id);
+  const label = user?.username
+    ? `@${escapeHtml(user.username)}`
+    : user
+      ? `<a href="tg://user?id=${user.telegram_id}">${escapeHtml(user.first_name ?? 'Winner')}</a>`
+      : `User #${validated.winner.user_id}`;
+  const text = [
+    `⚠️ <b>Ganti pemenang #${position}?</b>`,
+    '',
+    `${label} akan dibatalkan sebagai pemenang giveaway #${giveawayId}.`,
+    'Pemenang pengganti akan diundi dari peserta eligible dan dinotif lewat DM.',
+    '',
+    'Kemenangan yang dibatalkan tidak dihitung untuk pengurangan peluang giveaway berikutnya.',
+  ].join('\n');
+  const keyboard = manualRerollConfirmKeyboard(
+    giveawayId,
+    position,
+    expectedUserId,
+  );
+
+  await answerCallback(env, cq.id);
+  if (cq.message) {
+    await editMessageText(
+      env,
+      cq.from.id,
+      cq.message.message_id,
+      text,
+      { reply_markup: keyboard },
+    );
+  } else {
+    await sendMessage(env, cq.from.id, text, { reply_markup: keyboard });
+  }
+}
+
+async function handleManualRerollConfirm(
+  env: Env,
+  cq: CallbackQuery,
+  giveawayId: number,
+  position: number,
+  expectedUserId: number,
+): Promise<void> {
+  const validated = await validateManualReroll(
+    env,
+    cq,
+    giveawayId,
+    position,
+    expectedUserId,
+  );
+  if (!validated) return;
+
+  await answerCallback(env, cq.id, '🔁 Mengundi pengganti…');
+  const result = await executeGuardedReroll(
+    env,
+    validated.giveaway,
+    position,
+    expectedUserId,
+  );
+  const note = result.status === 'replaced'
+    ? `✅ Posisi #${position} berhasil diganti. Pemenang lama tidak dihitung menang.`
+    : result.status === 'no_candidate'
+      ? `⚠️ Posisi #${position}: tidak ada kandidat pengganti yang eligible.`
+      : `⚠️ Posisi #${position} sudah berubah. Tidak ada pemenang yang diganti.`;
+  await showWinnersManage(env, cq, validated.giveaway, note);
 }
 
 /** Redraw ALL winners for an ended giveaway (admin-only), then refresh the view. */
@@ -626,9 +768,28 @@ export async function handleCallback(env: Env, cq: CallbackQuery): Promise<void>
     case 'rrall':
       await handleRedrawAll(env, cq, giveawayId);
       return;
+    case 'wmanage':
+      await handleWinnersManage(env, cq, giveawayId);
+      return;
     case 'wcheck':
       await handleWinnerMembershipCheck(env, cq, giveawayId);
       return;
+    case 'rmpick':
+    case 'rmcfm': {
+      const [, , posStr, userIdStr] = data.split(':');
+      const pos = Number(posStr);
+      const expectedUserId = Number(userIdStr);
+      if (!Number.isInteger(pos) || pos < 1 || !Number.isInteger(expectedUserId)) {
+        await answerCallback(env, cq.id, 'Tombol reroll sudah tidak berlaku.', true);
+        return;
+      }
+      if (action === 'rmpick') {
+        await handleManualRerollPick(env, cq, giveawayId, pos, expectedUserId);
+      } else {
+        await handleManualRerollConfirm(env, cq, giveawayId, pos, expectedUserId);
+      }
+      return;
+    }
     case 'rrpos': {
       const [, , posStr, userIdStr] = data.split(':');
       const pos = Number(posStr);
